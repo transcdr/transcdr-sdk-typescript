@@ -71,7 +71,7 @@ await transcdr.jobs.create({ input: { type: 'url', url: 'https://example.com/in.
 ```ts
 const transcdr = new Transcdr({
   apiKey: 'tdk_live_…',              // API key (tdk_live_/tdk_test_) or session token (tds_)
-  baseUrl: 'https://api.transcdr.io', // default
+  baseUrl: 'https://api.transcdr.com', // default
   maxRetries: 2,                      // retries for 429, 5xx and network errors (default 2)
   timeoutMs: 60_000,                  // per attempt (default 60 s)
   retryDelayMs: 500,                  // backoff base (default 500 ms)

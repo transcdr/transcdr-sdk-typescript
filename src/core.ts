@@ -2,7 +2,7 @@ import { ConnectionError, TimeoutError, TranscdrError, errorFromResponse } from 
 import { PagePromise, asList } from './pagination';
 import type { ListResponse } from './types';
 
-export const DEFAULT_BASE_URL = 'https://api.transcdr.io';
+export const DEFAULT_BASE_URL = 'https://api.transcdr.com';
 export const SDK_VERSION = '0.1.0';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -10,7 +10,7 @@ export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 export interface ClientOptions {
   /** A secret API key (`tdk_live_…` / `tdk_test_…`) or a session token (`tds_…`). */
   apiKey?: string | null;
-  /** Default `https://api.transcdr.io`. An empty string means "same origin" in browsers. */
+  /** Default `https://api.transcdr.com`. An empty string means "same origin" in browsers. */
   baseUrl?: string;
   /** A custom `fetch` (defaults to the global one). */
   fetch?: FetchLike;
