@@ -1090,6 +1090,99 @@ export interface ConnectionTestResult {
   connection: Connection;
 }
 
+// ---------------------------------------------------------------------------
+// Integration checks: live verification of a connection or event destination
+// ---------------------------------------------------------------------------
+
+export type CheckStepStatus = 'passed' | 'failed' | 'skipped';
+
+/**
+ * Step ids. Connections: `settings`, `connect`, `identity`, `list`, `write`, `read`, `delete`.
+ * Destinations: `identity`, then `deliver` (https), `publish` (sns) or `send` (sqs).
+ */
+export type CheckStepId =
+  | 'settings'
+  | 'connect'
+  | 'identity'
+  | 'list'
+  | 'write'
+  | 'read'
+  | 'delete'
+  | 'deliver'
+  | 'publish'
+  | 'send';
+
+export interface CheckStep {
+  id: CheckStepId | (string & {});
+  label: string;
+  status: CheckStepStatus;
+  /** What happened, e.g. `Connected to s3://media/uploads.` or the provider error. */
+  detail?: string | null;
+  /** On failure: what to change, e.g. which permission to grant. */
+  hint?: string | null;
+  duration_ms?: number | null;
+}
+
+/** Who the credentials sign in as. */
+export type CheckIdentity =
+  | { provider: 'aws'; arn: string; account: string }
+  | { provider: 'gcp'; service_account: string; project: string }
+  | { provider: 'azure'; account: string; auth: string }
+  | { provider: 's3_compatible'; access_key_id: string }
+  | { provider: 'sftp'; user: string; server: string };
+
+/** Which roles a connection can serve, given the permissions that passed. */
+export interface ConnectionCheckRoles {
+  source: boolean;
+  watch_folder: boolean;
+  destination: boolean;
+}
+
+/** Provider-specific setup instructions, scoped to the bucket, topic or queue. */
+export interface CheckSetup {
+  summary?: string;
+  /** s3 (AWS), sns, sqs: a least-privilege IAM policy document. */
+  iam_policy?: Record<string, unknown>;
+  /** s3 */
+  source_only?: string;
+  destination_only?: string;
+  kms?: string;
+  /** gcs: IAM role; azure: RBAC role. */
+  role?: string;
+  source_only_role?: string;
+  /** gcs: a gcloud command granting the role. */
+  command?: string;
+  /** azure: SAS permission letters. */
+  sas_permissions?: string;
+  source_only_sas_permissions?: string;
+  [key: string]: unknown;
+}
+
+interface CheckReportBase {
+  /** True when every step passed (skipped steps do not count against it). */
+  ok: boolean;
+  steps: CheckStep[];
+  identity: CheckIdentity | null;
+  setup: CheckSetup | null;
+}
+
+export interface ConnectionCheck extends CheckReportBase {
+  object: 'connection_check';
+  roles: ConnectionCheckRoles;
+  /** Saved connections only: the connection with its updated `status` and `last_error`. */
+  connection?: Connection;
+}
+
+export interface WebhookCheck extends CheckReportBase {
+  object: 'webhook_check';
+  roles: { notifications: boolean };
+  /** Saved endpoints only. */
+  endpoint?: WebhookEndpoint;
+}
+
+/** Same body as `connections.create`; the name is optional. */
+export type ConnectionCheckParams = Omit<ConnectionCreateParams, 'name'> & { name?: string };
+
 /** A file (or, when `path` ends in `/`, a folder) in a connection. */
 export interface RemoteObject {
   object: 'remote_object';

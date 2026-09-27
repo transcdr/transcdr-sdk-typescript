@@ -8,6 +8,8 @@ import type {
   AutomationUpdateParams,
   BrowseParams,
   Connection,
+  ConnectionCheck,
+  ConnectionCheckParams,
   ConnectionCreateParams,
   ConnectionTestResult,
   ConnectionUpdateParams,
@@ -50,6 +52,19 @@ export class Connections extends Resource {
   /** Check the credentials and reachability again. */
   test(id: string, options?: RequestOptions): Promise<ConnectionTestResult> {
     return this.core.request('POST', `/v1/connections/${seg(id)}/test`, options);
+  }
+
+  /**
+   * Verify settings without saving them: signs in, lists, writes a probe object
+   * (`.transcdr-check/<random>.txt`), reads it back and deletes it. Returns a step-by-step report.
+   */
+  check(params: ConnectionCheckParams, options?: RequestOptions): Promise<ConnectionCheck> {
+    return this.core.request('POST', '/v1/connections/check', { ...options, body: params });
+  }
+
+  /** Verify a saved connection; also updates its `status` and `last_error` (returned as `connection`). */
+  checkSaved(id: string, options?: RequestOptions): Promise<ConnectionCheck> {
+    return this.core.request('POST', `/v1/connections/${seg(id)}/check`, options);
   }
 
   /** List files under a prefix (up to 1,000; `has_more` means the listing was cut short). */

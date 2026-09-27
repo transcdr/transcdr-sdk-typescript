@@ -10,6 +10,7 @@ import {
 import type {
   Event,
   ListParams,
+  WebhookCheck,
   WebhookCreateParams,
   WebhookDelivery,
   WebhookEndpoint,
@@ -55,6 +56,19 @@ export class Webhooks extends Resource {
   /** Send a `webhook.test` event to the endpoint. */
   test(id: string, options?: RequestOptions): Promise<WebhookDelivery | Event> {
     return this.core.request('POST', `/v1/webhooks/${seg(id)}/test`, options);
+  }
+
+  /**
+   * Verify a destination without saving it: checks the credentials and sends a signed
+   * `webhook.test` event (signed with a throwaway secret). Returns a step-by-step report.
+   */
+  check(params: WebhookCreateParams, options?: RequestOptions): Promise<WebhookCheck> {
+    return this.core.request('POST', '/v1/webhooks/check', { ...options, body: params });
+  }
+
+  /** Verify a saved endpoint; the report includes the `endpoint`. */
+  checkSaved(id: string, options?: RequestOptions): Promise<WebhookCheck> {
+    return this.core.request('POST', `/v1/webhooks/${seg(id)}/check`, options);
   }
 
   deliveries(id: string, params: ListParams = {}, options?: RequestOptions): PagePromise<WebhookDelivery> {

@@ -97,13 +97,13 @@ Every method also takes a trailing `RequestOptions` (`signal`, `timeoutMs`, `max
 | `jobs` | `create`, `list`, `listAll`, `retrieve`, `cancel`, `retry`, `del`, `events`, `outputs`, `outputUrl`, `fileUrl`, `waitFor`, `deliveries`, `deliver` |
 | `probe` | `create({ input, wait })` |
 | `presets` | `list`, `listAll`, `create`, `retrieve` (id or slug), `update`, `del` |
-| `webhooks` | `list`, `listAll`, `create` (HTTPS, SNS or SQS), `retrieve`, `update`, `del`, `rotateSecret`, `test`, `deliveries`, `redeliver`, `verifySignature`, `verifySnsSqsSignature`, `constructEvent` |
+| `webhooks` | `list`, `listAll`, `create` (HTTPS, SNS or SQS), `retrieve`, `update`, `del`, `rotateSecret`, `test`, `check`, `checkSaved`, `deliveries`, `redeliver`, `verifySignature`, `verifySnsSqsSignature`, `constructEvent` |
 | `events` | `list`, `retrieve` |
 | `usage` | `retrieve({ from, to, granularity })` |
 | `billing` | `retrieve`, `checkout({ plan } \| { creditCents })`, `portal`, `updateSettings`, `transactions`, `changePlan`, `invoices.list` (monthly statements) |
 | `plans` | `list` |
 | `capabilities` | `retrieve` |
-| `connections` | `list`, `listAll`, `create`, `retrieve`, `update`, `del`, `test`, `browse({ prefix, recursive })` |
+| `connections` | `list`, `listAll`, `create`, `retrieve`, `update`, `del`, `test`, `check`, `checkSaved`, `browse({ prefix, recursive })` |
 | `automations` | `list`, `listAll`, `create`, `retrieve`, `update`, `del`, `run`, `trigger`, `rotateHookToken`, `items` |
 | `deliveries` | `retry` (see also `jobs.deliveries`, `jobs.deliver`) |
 | `status` | `retrieve`: `{ status, queue_depth, running_jobs, version }` |
@@ -309,10 +309,27 @@ const asset = await transcdr.uploads.uploadFile(fileInput.files[0], {
 Never ship a secret API key to a browser. Call the API from your server, or use a session token for a signed-in
 dashboard user.
 
+## Verifying an integration
+
+`connections.check` and `webhooks.check` take the same body as `create` and run a live check without saving;
+`checkSaved(id)` checks a stored one. The report lists each step (`passed`, `failed` or `skipped`, with a `detail`
+and, on failure, a `hint`), who the credentials sign in as, which roles the connection can serve, and the exact
+policy or role to grant.
+
+```ts
+const report = await transcdr.connections.check({
+  kind: 's3',
+  config: { bucket: 'media', region: 'us-east-1', root: 'uploads/' },
+  secrets: { access_key_id: 'AKIA…', secret_access_key: '…' },
+});
+for (const step of report.steps) console.log(step.status, step.label, step.hint ?? '');
+if (!report.roles.destination) console.log(JSON.stringify(report.setup?.iam_policy, null, 2));
+```
+
 ## Types
 
 Every API object is exported as a type: `Job`, `OutputSpec`, `OutputSpecInput`, `Rendition`, `Asset`, `Upload`,
-`Preset`, `WebhookEndpoint`, `WebhookDelivery`, `Event`, `ApiKey`, `Organization`, `User`, `Usage`, `Plan`, `Billing`,
+`Preset`, `WebhookEndpoint`, `WebhookDelivery`, `ConnectionCheck`, `WebhookCheck`, `Event`, `ApiKey`, `Organization`, `User`, `Usage`, `Plan`, `Billing`,
 `CreditAccount`, `CreditTransaction`, `Statement`, `MediaInfo`, `ListResponse<T>` and more, plus constants such as `JOB_STATUSES`, `EVENT_TYPES` and `SCOPES`.
 
 ## License
