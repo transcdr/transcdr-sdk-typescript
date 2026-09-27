@@ -1048,6 +1048,70 @@ export interface AdminOrganizationUpdateParams {
   suspended?: boolean;
 }
 
+export interface AdminAnnouncementCreateParams {
+  title: string;
+  /** Markdown. */
+  body: string;
+  link?: AnnouncementLink | null;
+  tags?: string[];
+  /** Defaults to now; `null` saves a draft; a future time schedules it. */
+  published_at?: Timestamp | null;
+}
+
+export type AdminAnnouncementUpdateParams = Partial<AdminAnnouncementCreateParams>;
+
+// ---------------------------------------------------------------------------
+// Announcements: the changelog and service-credit notices
+// ---------------------------------------------------------------------------
+
+export type AnnouncementKind = 'changelog' | 'service_credit';
+
+export const ANNOUNCEMENT_KINDS: readonly AnnouncementKind[] = ['changelog', 'service_credit'];
+
+/** A call to action. A `url` that is a path (`/app/…`) is on the dashboard. */
+export interface AnnouncementLink {
+  label: string;
+  url: string;
+}
+
+/** What an incident's credit gave back to your organization. */
+export interface ServiceCredit {
+  incident_id: string;
+  amount_usd: number;
+  /** How many times the affected charges were credited. */
+  multiplier: number;
+  /** The affected jobs. */
+  jobs: string[];
+  applied_at: Timestamp;
+}
+
+export interface Announcement {
+  object: 'announcement';
+  id: string;
+  kind: AnnouncementKind;
+  title: string;
+  /** Markdown. */
+  body: string;
+  /** `null` for a draft (operator console only). */
+  published_at: Timestamp | null;
+  link: AnnouncementLink | null;
+  /** Changelog entries only; may be empty. */
+  tags: string[];
+  /** Service credits only. */
+  credit: ServiceCredit | null;
+  /** Always false for API keys, which have no user to remember it for. */
+  seen: boolean;
+  seen_at: Timestamp | null;
+}
+
+export interface AnnouncementListParams {
+  /** Only what the signed-in user has not seen: service credits first, then the last 90 days of changelog. */
+  unseen?: boolean;
+  kind?: AnnouncementKind;
+  /** 1–100, default 20. */
+  limit?: number;
+}
+
 // ---------------------------------------------------------------------------
 // Integrations: connections, automations, deliveries (Starter plan and above)
 // ---------------------------------------------------------------------------

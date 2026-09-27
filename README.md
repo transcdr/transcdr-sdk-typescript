@@ -108,7 +108,9 @@ Every method also takes a trailing `RequestOptions` (`signal`, `timeoutMs`, `max
 | `deliveries` | `retry` (see also `jobs.deliveries`, `jobs.deliver`) |
 | `status` | `retrieve`: `{ status, queue_depth, running_jobs, version }` |
 | `stats` | `get`: public platform totals, last 24 h and 30 daily points |
-| `admin` | platform operators only: `overview`, `jobs`, `organizations`, `updateOrganization` |
+| `announcements` | `list({ unseen, kind, limit })`, `markSeen(ids)`, `markAllSeen()` |
+| `changelog` | `list`: public, published changelog entries |
+| `admin` | platform operators only: `overview`, `jobs`, `organizations`, `updateOrganization`, `announcements.list`, `announcements.create`, `announcements.update`, `announcements.del` |
 
 For anything newer than the SDK, `transcdr.request(method, path, options)` calls an endpoint directly.
 
@@ -326,6 +328,27 @@ times in a row, is turned off (`enabled: false`, with `disabled_reason` and `dis
 event is sent and the organization's owners get an email. While off, anything that names it gets a 409
 `connection_disabled`. Fix the cause, then `await transcdr.connections.enable(id)`.
 
+## Announcements
+
+What's new, and the service credits your organization received after an incident. A dashboard asks for what the
+signed-in user has not seen yet (service credits come first), shows it, and records that it was seen:
+
+```ts
+const { data } = await transcdr.announcements.list({ unseen: true });
+for (const a of data) {
+  if (a.kind === 'service_credit') console.log(`Credit: $${a.credit!.amount_usd} for ${a.credit!.jobs.length} jobs`);
+  else console.log(a.title, a.tags, a.link?.url);
+}
+await transcdr.announcements.markSeen(data.map((a) => a.id)); // or markAllSeen()
+```
+
+`body` is Markdown. Seen state belongs to a user, so it needs a session token: with an API key `seen` is always
+`false` and nothing is recorded. The changelog is also public, with no key at all:
+
+```ts
+for await (const entry of new Transcdr().changelog.list().autoPaginate()) console.log(entry.published_at, entry.title);
+```
+
 ## Test mode
 
 Use a test key (`tdk_test_…`) while developing. Test jobs are validated like live ones but never touch a GPU: they
@@ -365,7 +388,7 @@ if (!report.roles.destination) console.log(JSON.stringify(report.setup?.iam_poli
 
 Every API object is exported as a type: `Job`, `OutputSpec`, `OutputSpecInput`, `Rendition`, `Asset`, `Upload`,
 `Preset`, `WebhookEndpoint`, `WebhookDelivery`, `ConnectionCheck`, `WebhookCheck`, `Event`, `ApiKey`, `Organization`, `User`, `Usage`, `Plan`, `Billing`,
-`CreditAccount`, `CreditTransaction`, `Statement`, `MediaInfo`, `ListResponse<T>` and more, plus constants such as `JOB_STATUSES`, `EVENT_TYPES` and `SCOPES`.
+`CreditAccount`, `CreditTransaction`, `Statement`, `Announcement`, `ServiceCredit`, `MediaInfo`, `ListResponse<T>` and more, plus constants such as `JOB_STATUSES`, `EVENT_TYPES` and `SCOPES`.
 
 ## License
 

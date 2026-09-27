@@ -1,5 +1,6 @@
 import { Core, type ClientOptions, type RequestOptions } from './core';
 import { Admin } from './resources/admin';
+import { Announcements, Changelog } from './resources/announcements';
 import { ApiKeys } from './resources/apiKeys';
 import { Assets } from './resources/assets';
 import { Auth } from './resources/auth';
@@ -50,6 +51,9 @@ export class Transcdr {
   readonly connections: Connections;
   readonly automations: Automations;
   readonly deliveries: Deliveries;
+  readonly announcements: Announcements;
+  /** Public. */
+  readonly changelog: Changelog;
   /** Platform operators only. */
   readonly admin: Admin;
 
@@ -74,6 +78,8 @@ export class Transcdr {
     this.connections = new Connections(this.core);
     this.automations = new Automations(this.core);
     this.deliveries = new Deliveries(this.core);
+    this.announcements = new Announcements(this.core);
+    this.changelog = new Changelog(this.core);
     this.admin = new Admin(this.core);
   }
 

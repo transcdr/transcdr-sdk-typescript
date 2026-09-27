@@ -297,6 +297,78 @@ describe('integrations', () => {
   });
 });
 
+describe('announcements', () => {
+  const credit = {
+    object: 'announcement',
+    id: 'ann_c',
+    kind: 'service_credit',
+    title: 'Audio dropped from some outputs',
+    body: 'We credited 3x.',
+    published_at: '2026-09-27T09:00:00Z',
+    link: null,
+    tags: [],
+    credit: { incident_id: 'inc_1', amount_usd: 0.2563, multiplier: 3, jobs: ['job_1', 'job_2'], applied_at: '2026-09-27T09:00:00Z' },
+    seen: false,
+    seen_at: null,
+  };
+
+  it('lists unseen announcements and marks them seen', async () => {
+    const { fetch, calls } = mockFetch(json(list([credit], null)), json(undefined, 204), json(undefined, 204));
+    const t = client(fetch);
+    const page = await t.announcements.list({ unseen: true, kind: 'service_credit', limit: 5 });
+    expect(page.data[0].credit?.jobs).toHaveLength(2);
+    await t.announcements.markSeen(['ann_c', 'ann_2']);
+    await t.announcements.markAllSeen();
+    expect(calls.map((c) => [c.method, c.url, c.body])).toEqual([
+      ['GET', 'http://api.test/v1/announcements?kind=service_credit&limit=5&unseen=true', undefined],
+      ['POST', 'http://api.test/v1/announcements/seen', { ids: ['ann_c', 'ann_2'] }],
+      ['POST', 'http://api.test/v1/announcements/seen', { all: true }],
+    ]);
+  });
+
+  it('skips marking an empty list and omits unseen=false', async () => {
+    const { fetch, calls } = mockFetch(json(list([], null)));
+    const t = client(fetch);
+    await t.announcements.markSeen([]);
+    await t.announcements.list({ unseen: false });
+    expect(calls.map((c) => c.url)).toEqual(['http://api.test/v1/announcements']);
+  });
+
+  it('pages through the public changelog without a key', async () => {
+    const entry = (id: string) => ({ ...credit, id, kind: 'changelog', credit: null, tags: ['integrations'] });
+    const { fetch, calls } = mockFetch(json(list([entry('ann_1')], 'ann_1')), json(list([entry('ann_2')], null)));
+    const transcdr = new Transcdr({ baseUrl: 'http://api.test', fetch, retryDelayMs: 1 });
+    const all = await transcdr.changelog.list({ limit: 1 }).toArray();
+    expect(all.map((a) => a.id)).toEqual(['ann_1', 'ann_2']);
+    expect(calls.map((c) => c.url)).toEqual([
+      'http://api.test/v1/changelog?limit=1',
+      'http://api.test/v1/changelog?limit=1&cursor=ann_1',
+    ]);
+    expect(calls[0].headers.authorization).toBeUndefined();
+  });
+
+  it('lets operators write changelog entries and drafts', async () => {
+    const draft = { ...credit, id: 'ann_d', kind: 'changelog', credit: null, published_at: null };
+    const { fetch, calls } = mockFetch(
+      json(list([draft], null)),
+      json(draft),
+      json({ ...draft, published_at: '2026-09-27T10:00:00Z' }),
+      json(undefined, 204),
+    );
+    const t = client(fetch);
+    expect((await t.admin.announcements.list({ limit: 100 })).data[0].published_at).toBeNull();
+    await t.admin.announcements.create({ title: 'New', body: '**Hi**', tags: ['api'], link: { label: 'Docs', url: '/docs' }, published_at: null });
+    await t.admin.announcements.update('ann_d', { published_at: '2026-09-27T10:00:00Z' });
+    await t.admin.announcements.del('ann_d');
+    expect(calls.map((c) => [c.method, c.url, c.body])).toEqual([
+      ['GET', 'http://api.test/v1/admin/announcements?limit=100', undefined],
+      ['POST', 'http://api.test/v1/admin/announcements', { title: 'New', body: '**Hi**', tags: ['api'], link: { label: 'Docs', url: '/docs' }, published_at: null }],
+      ['PATCH', 'http://api.test/v1/admin/announcements/ann_d', { published_at: '2026-09-27T10:00:00Z' }],
+      ['DELETE', 'http://api.test/v1/admin/announcements/ann_d', undefined],
+    ]);
+  });
+});
+
 describe('uploads', () => {
   it('creates, PUTs the bytes to upload_url, and completes', async () => {
     const { fetch, calls } = mockFetch(
