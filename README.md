@@ -1,6 +1,6 @@
 # @transcdr/sdk
 
-The official TypeScript SDK for [Transcdr](https://transcdr.io): GPU-accelerated AV1, H.264 and H.265 transcoding
+The official TypeScript SDK for [Transcdr](https://transcdr.com): GPU-accelerated AV1, H.264 and H.265 transcoding
 with MP4 and CMAF/HLS output, behind one small REST API.
 
 - Zero runtime dependencies. Uses the platform `fetch`.
@@ -416,6 +416,15 @@ if (!report.roles.destination) console.log(JSON.stringify(report.setup?.iam_poli
 Every API object is exported as a type: `Job`, `OutputSpec`, `OutputSpecInput`, `Rendition`, `Asset`, `Upload`,
 `Preset`, `WebhookEndpoint`, `WebhookDelivery`, `ConnectionCheck`, `WebhookCheck`, `Event`, `ApiKey`, `Organization`, `User`, `Usage`, `Plan`, `Billing`,
 `CreditAccount`, `CreditTransaction`, `Statement`, `Announcement`, `ServiceCredit`, `MediaInfo`, `ListResponse<T>` and more, plus constants such as `JOB_STATUSES`, `EVENT_TYPES` and `SCOPES`.
+
+## License
+
+MIT
+
+## Other languages
+
+- Go: [transcdr-sdk-go](https://github.com/transcdr/transcdr-sdk-go)
+- Swift (iOS and macOS): [transcdr-sdk-swift](https://github.com/transcdr/transcdr-sdk-swift)
 
 ## License
 
