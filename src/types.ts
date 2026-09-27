@@ -31,15 +31,22 @@ export type Codec = 'av1' | 'h264' | 'h265';
 export type AudioMode = 'auto' | 'opus' | 'drop';
 export type Color = 'sdr' | 'hdr10' | 'hlg' | 'passthrough';
 export type BitDepth = 'auto' | '8bit' | '10bit';
-/** `visually_lossless` | `high` | `standard` | `low` | `vmaf=N` (1–100). */
-export type QualityTarget = 'visually_lossless' | 'high' | 'standard' | 'low' | `vmaf=${number}`;
+/**
+ * `visually_lossless` | `high` | `standard` | `low` | `vmaf=N` (1–100), or `cbr`
+ * to code every rendition at a constant bit rate instead of to a quality level.
+ */
+export type QualityTarget = 'visually_lossless' | 'high' | 'standard' | 'low' | `vmaf=${number}` | 'cbr';
 
 export interface Rendition {
   /** Even, 64–7680. */
   width: number;
   /** Even, 64–4320. */
   height: number;
-  /** Target bitrate such as `"3M"` or `"800k"`; omitted codes to the quality target. */
+  /**
+   * This rendition's constant bitrate, such as `"3M"` or `"800k"` (100k–200M), when
+   * `quality.target` is `"cbr"`; refused otherwise. Omitted, it takes `quality.bitrate`
+   * or a default for its resolution and codec.
+   */
   bitrate?: string | null;
   /** Display label, 1–32 of `[A-Za-z0-9_-]`; defaults to `"<short side>p"`. */
   label?: string | null;
@@ -52,8 +59,12 @@ export interface Ladder {
 
 export interface Quality {
   target?: QualityTarget | string | null;
-  /** 0–63; wins over `target`. */
+  /** 0–63; wins over `target`. Not with `"cbr"`. */
   crf?: number | null;
+  /** `"cbr"` only: the rate for renditions without their own, such as `"5M"` (100k–200M). */
+  bitrate?: string | null;
+  /** `"cbr"` only: the rate buffer in milliseconds, 100–10000 (default 1000). */
+  buffer_ms?: number | null;
 }
 
 export interface Audio {

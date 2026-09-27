@@ -42,6 +42,17 @@ describe('requests', () => {
     expect(calls[0].body).toEqual({ input: { type: 'url', url: 'https://example.com/in.mp4' }, preset: 'hls-av1-abr' });
   });
 
+  it('sends a constant bit rate output as written', async () => {
+    const { fetch, calls } = mockFetch(json(job('job_1')));
+    const output = {
+      codec: 'h264' as const,
+      renditions: [{ width: 1920, height: 1080, bitrate: '5M' }, { width: 1280, height: 720 }],
+      quality: { target: 'cbr' as const, bitrate: '3M', buffer_ms: 500 },
+    };
+    await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, output });
+    expect(calls[0].body).toEqual({ input: { type: 'asset', asset_id: 'ast_1' }, output });
+  });
+
   it('generates an Idempotency-Key for jobs.create and uploads.create', async () => {
     const { fetch, calls } = mockFetch(json(job('job_1')), json({ object: 'upload', id: 'upl_1' }));
     const transcdr = client(fetch);
