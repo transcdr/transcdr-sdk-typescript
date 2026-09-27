@@ -262,6 +262,24 @@ describe('integrations', () => {
     expect(calls[0].url).toBe('http://api.test/v1/connections/con_1/browse?prefix=in%2F&recursive=true');
   });
 
+  it('turns a connection off and back on', async () => {
+    const { fetch, calls } = mockFetch(json({ object: 'connection', id: 'con_1', enabled: false }), json({ object: 'connection', id: 'con_1', enabled: true }));
+    const t = client(fetch);
+    expect((await t.connections.disable('con_1')).enabled).toBe(false);
+    expect((await t.connections.enable('con_1')).enabled).toBe(true);
+    expect(calls.map((c) => [c.method, c.url, c.body])).toEqual([
+      ['PATCH', 'http://api.test/v1/connections/con_1', { enabled: false }],
+      ['PATCH', 'http://api.test/v1/connections/con_1', { enabled: true }],
+    ]);
+  });
+
+  it('reads a queue automation now', async () => {
+    const { fetch, calls } = mockFetch(json({ object: 'automation_run', messages_received: 3, messages_deleted: 3, jobs_created: 2 }));
+    const run = await client(fetch).automations.run('aut_q');
+    expect(run).toMatchObject({ messages_received: 3, messages_deleted: 3, jobs_created: 2 });
+    expect(calls[0].url).toBe('http://api.test/v1/automations/aut_q/run');
+  });
+
   it('triggers an automation and delivers a job', async () => {
     const { fetch, calls } = mockFetch(
       json({ object: 'automation_run', jobs_created: 1, job_ids: ['job_1'] }),

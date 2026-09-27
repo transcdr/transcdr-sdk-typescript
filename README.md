@@ -97,13 +97,13 @@ Every method also takes a trailing `RequestOptions` (`signal`, `timeoutMs`, `max
 | `jobs` | `create`, `list`, `listAll`, `retrieve`, `cancel`, `retry`, `del`, `events`, `outputs`, `outputUrl`, `fileUrl`, `waitFor`, `deliveries`, `deliver` |
 | `probe` | `create({ input, wait })` |
 | `presets` | `list`, `listAll`, `create`, `retrieve` (id or slug), `update`, `del` |
-| `webhooks` | `list`, `listAll`, `create` (HTTPS, SNS or SQS), `retrieve`, `update`, `del`, `rotateSecret`, `test`, `check`, `checkSaved`, `deliveries`, `redeliver`, `verifySignature`, `verifySnsSqsSignature`, `constructEvent` |
+| `webhooks` | `list`, `listAll`, `create` (HTTPS, SNS, SQS or through a connection), `retrieve`, `update`, `del`, `rotateSecret`, `test`, `check`, `checkSaved`, `deliveries`, `redeliver`, `verifySignature`, `verifySnsSqsSignature`, `constructEvent` |
 | `events` | `list`, `retrieve` |
 | `usage` | `retrieve({ from, to, granularity })` |
 | `billing` | `retrieve`, `checkout({ plan } \| { creditCents })`, `portal`, `updateSettings`, `transactions`, `changePlan`, `invoices.list` (monthly statements) |
 | `plans` | `list` |
 | `capabilities` | `retrieve` |
-| `connections` | `list`, `listAll`, `create`, `retrieve`, `update`, `del`, `test`, `check`, `checkSaved`, `browse({ prefix, recursive })` |
+| `connections` | `list`, `listAll`, `create`, `retrieve`, `update`, `enable`, `disable`, `del`, `test`, `check`, `checkSaved`, `browse({ prefix, recursive })` |
 | `automations` | `list`, `listAll`, `create`, `retrieve`, `update`, `del`, `run`, `trigger`, `rotateHookToken`, `items` |
 | `deliveries` | `retry` (see also `jobs.deliveries`, `jobs.deliver`) |
 | `status` | `retrieve`: `{ status, queue_depth, running_jobs, version }` |
@@ -290,6 +290,41 @@ export const handler: SQSHandler = async (sqsEvent) => {
 
 Messages can wait in a queue, so pass a tolerance longer than the default 300 seconds (or `Infinity`, relying on the
 event id for de-duplication) when you consume a backlog.
+
+## Messaging connections and queue automations
+
+Besides storage, a connection can be an Amazon SQS queue, an Amazon SNS topic or an HTTPS webhook (`class:
+"messaging"`). They receive events through an endpoint that names them, and an SQS queue can trigger automations:
+S3 bucket notifications (sent straight to the queue or fanned out through SNS), EventBridge `Object Created` events,
+`POST /v1/jobs` bodies and `{path}` / `{paths}` messages all start jobs.
+
+```ts
+const queue = await transcdr.connections.create({
+  name: 'Ingest queue',
+  kind: 'sqs',
+  config: { queue_url: 'https://sqs.us-east-1.amazonaws.com/123456789012/transcdr-ingest', region: 'us-east-1' },
+  secrets: { access_key_id: 'AKIA…', secret_access_key: '…' },
+});
+
+await transcdr.automations.create({
+  name: 'Ingest → HLS',
+  trigger: 'queue',
+  trigger_connection_id: queue.id,
+  source: { connection_id: bucket.id, prefix: 'incoming/', pattern: '**/*.{mp4,mov}' },
+  preset: 'hls-av1-abr',
+});
+
+// Events through the same kind of connection
+await transcdr.webhooks.create({ connection_id: topic.id, events: ['job.completed', 'connection.disabled'] });
+```
+
+`connections.checkSaved(queue.id)` returns the IAM policy for the consumer key plus the queue policies for S3 and SNS
+and the bucket notification JSON in `setup`.
+
+A connection that fails permanently (credentials rejected, access denied, bucket, queue or topic gone), or fails 5
+times in a row, is turned off (`enabled: false`, with `disabled_reason` and `disabled_at`), a `connection.disabled`
+event is sent and the organization's owners get an email. While off, anything that names it gets a 409
+`connection_disabled`. Fix the cause, then `await transcdr.connections.enable(id)`.
 
 ## Test mode
 

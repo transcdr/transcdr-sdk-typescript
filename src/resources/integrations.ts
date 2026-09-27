@@ -20,7 +20,10 @@ import type {
 } from '../types';
 import { Resource, seg } from './base';
 
-/** Your storage: where inputs come from and outputs go. */
+/**
+ * Your storage (where inputs come from and outputs go) and messaging connections
+ * (`sqs`, `sns`, `webhook`: they receive events, and an `sqs` queue can trigger automations).
+ */
 export class Connections extends Resource {
   list(params: ListParams = {}, options?: RequestOptions): PagePromise<Connection> {
     return this.core.list('/v1/connections', { ...params }, options);
@@ -42,6 +45,19 @@ export class Connections extends Resource {
   /** Config merges; an omitted secret is kept and `""` clears it. */
   update(id: string, params: ConnectionUpdateParams, options?: RequestOptions): Promise<Connection> {
     return this.core.request('PATCH', `/v1/connections/${seg(id)}`, { ...options, body: params });
+  }
+
+  /**
+   * Turn a connection back on after it was disabled: the failure count resets and it is tested again
+   * (the result is in `status` and `last_error`).
+   */
+  enable(id: string, options?: RequestOptions): Promise<Connection> {
+    return this.update(id, { enabled: true }, options);
+  }
+
+  /** Turn a connection off by hand. Anything that uses it is refused with 409 `connection_disabled` until it is back on. */
+  disable(id: string, options?: RequestOptions): Promise<Connection> {
+    return this.update(id, { enabled: false }, options);
   }
 
   /** Refused with 409 while an automation uses the connection. */
@@ -102,7 +118,10 @@ export class Automations extends Resource {
     await this.core.request('DELETE', `/v1/automations/${seg(id)}`, options);
   }
 
-  /** Poll the source now. */
+  /**
+   * Watch automations: poll the source now (`{jobs_created}`). Queue automations: read one batch from the
+   * queue now (`{messages_received, messages_deleted, jobs_created}`).
+   */
   run(id: string, options?: RequestOptions): Promise<AutomationRun> {
     return this.core.request('POST', `/v1/automations/${seg(id)}/run`, options);
   }

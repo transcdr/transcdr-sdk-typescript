@@ -27,6 +27,7 @@ const endpoint = (extra: Partial<WebhookEndpoint>): WebhookEndpoint => ({
   created_at: '2026-01-01T00:00:00Z',
   last_delivery_at: null,
   failure_count: 0,
+  connection_id: null,
   ...extra,
 });
 
@@ -41,6 +42,13 @@ describe('event destinations: requests', () => {
     expect(calls[0].method).toBe('POST');
     expect(calls[0].url).toBe('http://api.test/v1/webhooks');
     expect(calls[0].body).toEqual({ url: 'https://example.com/hooks', events: ['job.completed'] });
+  });
+
+  it('sends through a messaging connection', async () => {
+    const { fetch, calls } = mockFetch(json(endpoint({ type: 'sqs', url: QUEUE, queue_url: QUEUE, connection_id: 'con_q' })));
+    const created = await client(fetch).webhooks.create({ connection_id: 'con_q', events: ['connection.disabled'] });
+    expect(calls[0].body).toEqual({ connection_id: 'con_q', events: ['connection.disabled'] });
+    expect(created.connection_id).toBe('con_q');
   });
 
   it('sends an SNS destination with its AWS settings', async () => {

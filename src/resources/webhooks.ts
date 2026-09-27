@@ -29,8 +29,8 @@ export class Webhooks extends Resource {
   }
 
   /**
-   * Create an HTTPS, Amazon SNS or Amazon SQS destination.
-   * The returned endpoint carries `secret`: store it now, it is not shown again.
+   * Create an HTTPS, Amazon SNS or Amazon SQS destination, or one that sends through a messaging
+   * connection (`{ connection_id }`). The returned endpoint carries `secret`: store it now, it is not shown again.
    */
   create(params: WebhookCreateParams, options?: RequestOptions): Promise<WebhookEndpoint> {
     return this.core.request('POST', '/v1/webhooks', { ...options, body: params });

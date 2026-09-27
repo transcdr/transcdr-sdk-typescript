@@ -396,6 +396,7 @@ export type EventType =
   | 'job.delivered'
   | 'job.delivery_failed'
   | 'automation.triggered'
+  | 'connection.disabled'
   | 'webhook.test';
 
 export const EVENT_TYPES: readonly EventType[] = [
@@ -410,6 +411,7 @@ export const EVENT_TYPES: readonly EventType[] = [
   'job.delivered',
   'job.delivery_failed',
   'automation.triggered',
+  'connection.disabled',
   'webhook.test',
 ];
 
@@ -475,6 +477,11 @@ export interface WebhookEndpoint {
   updated_at?: Timestamp;
   last_delivery_at: Timestamp | null;
   failure_count: number;
+  /**
+   * The messaging connection (`sqs`, `sns` or `webhook`) events go through, or `null` when the
+   * endpoint carries its own target. The connection's health and `enabled` flag then apply.
+   */
+  connection_id: string | null;
 }
 
 export interface WebhookHttpsCreateParams {
@@ -502,7 +509,39 @@ export interface WebhookSqsCreateParams {
   description?: string;
 }
 
-export type WebhookCreateParams = WebhookHttpsCreateParams | WebhookSnsCreateParams | WebhookSqsCreateParams;
+/** Deliver through a messaging connection, which holds the target and its credentials. */
+export interface WebhookConnectionCreateParams {
+  /** A `con_…` id of an `sqs`, `sns` or `webhook` connection. */
+  connection_id: string;
+  events?: string[];
+  description?: string;
+}
+
+export type WebhookCreateParams =
+  | WebhookHttpsCreateParams
+  | WebhookSnsCreateParams
+  | WebhookSqsCreateParams
+  | WebhookConnectionCreateParams;
+
+/** The payload of a `connection.disabled` event (`data.object`). */
+export interface ConnectionDisabledEvent {
+  object: 'connection';
+  id: string;
+  name: string;
+  kind: ConnectionKind;
+  enabled: false;
+  disabled_at: Timestamp;
+  /** `"<activity>: <error>"`. */
+  disabled_reason: string;
+  /** What Transcdr was doing when it failed, e.g. reading a queue or delivering outputs. */
+  activity: string;
+  /** The provider's error. */
+  error: string;
+  /** What it most likely means and how to fix it. */
+  explanation: string;
+  /** Ids of the automations that use the connection; they pause until it is back on. */
+  automations: string[];
+}
 
 /** `type` cannot change after creation. */
 export interface WebhookUpdateParams {
@@ -1013,8 +1052,20 @@ export interface AdminOrganizationUpdateParams {
 // Integrations: connections, automations, deliveries (Starter plan and above)
 // ---------------------------------------------------------------------------
 
-export type ConnectionKind = 's3' | 'gcs' | 'azure_blob' | 'ftp' | 'ftps' | 'sftp' | 'http' | 'webdav';
+/** Where inputs come from and outputs go. */
+export type StorageConnectionKind = 's3' | 'gcs' | 'azure_blob' | 'ftp' | 'ftps' | 'sftp' | 'http' | 'webdav';
+/** Receives events; an `sqs` connection can also trigger automations. */
+export type MessagingConnectionKind = 'sqs' | 'sns' | 'webhook';
+export type ConnectionKind = StorageConnectionKind | MessagingConnectionKind;
+export type ConnectionClass = 'storage' | 'messaging';
 export type ConnectionStatus = 'untested' | 'ok' | 'error';
+
+export const MESSAGING_CONNECTION_KINDS: readonly MessagingConnectionKind[] = ['sqs', 'sns', 'webhook'];
+
+/** Whether a kind is a messaging one: never a job input, a destination or an automation source. */
+export function isMessagingKind(kind: string): kind is MessagingConnectionKind {
+  return (MESSAGING_CONNECTION_KINDS as readonly string[]).includes(kind);
+}
 
 /** Non-secret settings. Which fields apply depends on `kind`. */
 export interface ConnectionConfig {
@@ -1037,6 +1088,14 @@ export interface ConnectionConfig {
   passive?: boolean | null;
   /** sftp: expected host key, `SHA256:…`. */
   host_key_fingerprint?: string | null;
+  /** sqs: the queue URL, e.g. `https://sqs.us-east-1.amazonaws.com/123456789012/transcdr`. */
+  queue_url?: string | null;
+  /** sns: the topic ARN. */
+  topic_arn?: string | null;
+  /** webhook: the https URL events are POSTed to. */
+  url?: string | null;
+  /** sqs/sns: for FIFO queues and topics receiving events. */
+  message_group_id?: string | null;
 }
 
 /** Write-only credentials. On update, an omitted secret is kept and `""` clears it. */
@@ -1061,8 +1120,21 @@ export interface Connection {
   config: ConnectionConfig;
   /** Names of the secrets that are stored (their values are never returned). */
   secrets_set: (keyof ConnectionSecrets)[];
+  /** Messaging connections are `false` on all three. */
   capabilities: { source: boolean; destination: boolean; watch: boolean };
   status: ConnectionStatus;
+  /** `storage` (s3, gcs, …) or `messaging` (sqs, sns, webhook). */
+  class: ConnectionClass;
+  /**
+   * Turned off automatically after a permanent failure, or 5 transient failures in a row.
+   * While off, anything naming it is refused with 409 `connection_disabled`.
+   */
+  enabled: boolean;
+  /** Transient failures in a row; any success resets it. */
+  failure_count: number;
+  /** Why it was turned off: `"<activity>: <error>"`, or `"Disabled by hand."`. */
+  disabled_reason: string | null;
+  disabled_at: Timestamp | null;
   last_error: string | null;
   last_checked_at: Timestamp | null;
   created_at: Timestamp;
@@ -1078,6 +1150,8 @@ export interface ConnectionCreateParams {
 
 export interface ConnectionUpdateParams {
   name?: string;
+  /** `true` turns it back on (the failure count resets and it is tested again); `false` turns it off. */
+  enabled?: boolean;
   /** Merged into the stored config. */
   config?: ConnectionConfig;
   secrets?: ConnectionSecrets;
@@ -1131,11 +1205,19 @@ export type CheckIdentity =
   | { provider: 's3_compatible'; access_key_id: string }
   | { provider: 'sftp'; user: string; server: string };
 
-/** Which roles a connection can serve, given the permissions that passed. */
+/** Which roles a storage connection can serve, given the permissions that passed. */
 export interface ConnectionCheckRoles {
   source: boolean;
   watch_folder: boolean;
   destination: boolean;
+}
+
+/** Roles in the check of a messaging connection. */
+export interface MessagingCheckRoles {
+  /** sqs: the queue can be read, so it can trigger automations. */
+  trigger?: boolean;
+  /** sns, webhook: the test event got through. */
+  notifications?: boolean;
 }
 
 /** Provider-specific setup instructions, scoped to the bucket, topic or queue. */
@@ -1152,6 +1234,14 @@ export interface CheckSetup {
   source_only_role?: string;
   /** gcs: a gcloud command granting the role. */
   command?: string;
+  /** sqs connection: the queue access policy that lets S3 send bucket notifications to the queue. */
+  queue_policy_for_s3?: Record<string, unknown>;
+  /** sqs connection: the queue access policy that lets an SNS topic fan out to the queue. */
+  queue_policy_for_sns?: Record<string, unknown>;
+  /** sqs connection: the bucket's notification configuration (`QueueConfigurations`). */
+  s3_notification?: Record<string, unknown>;
+  /** Extra guidance, one line each. */
+  notes?: string[];
   /** azure: SAS permission letters. */
   sas_permissions?: string;
   source_only_sas_permissions?: string;
@@ -1168,7 +1258,8 @@ interface CheckReportBase {
 
 export interface ConnectionCheck extends CheckReportBase {
   object: 'connection_check';
-  roles: ConnectionCheckRoles;
+  /** Storage: `source`, `watch_folder`, `destination`. Messaging: `trigger` (sqs) or `notifications` (sns, webhook). */
+  roles: Partial<ConnectionCheckRoles> & MessagingCheckRoles;
   /** Saved connections only: the connection with its updated `status` and `last_error`. */
   connection?: Connection;
 }
@@ -1196,7 +1287,8 @@ export interface BrowseParams {
   recursive?: boolean;
 }
 
-export type AutomationTrigger = 'watch' | 'hook';
+/** `watch` polls the source, `hook` takes pushes at `hook_url`, `queue` consumes an SQS connection. */
+export type AutomationTrigger = 'watch' | 'hook' | 'queue';
 
 export interface Automation {
   object: 'automation';
@@ -1204,6 +1296,9 @@ export interface Automation {
   name: string;
   enabled: boolean;
   trigger: AutomationTrigger;
+  /** `queue`: the `sqs` connection it consumes. */
+  trigger_connection_id: string | null;
+  /** A storage connection: where the files are. */
   source: { connection_id: string; prefix: string; pattern: string };
   poll_interval_seconds: number;
   settle_seconds: number;
@@ -1230,6 +1325,9 @@ export interface AutomationCreateParams {
   name: string;
   enabled?: boolean;
   trigger?: AutomationTrigger;
+  /** Required for `queue`: an enabled `sqs` connection. `""` clears it. */
+  trigger_connection_id?: string | null;
+  /** A storage connection: where the files are. */
   source: { connection_id: string; prefix?: string; pattern?: string };
   /** 60–86400. */
   poll_interval_seconds?: number;
@@ -1253,6 +1351,10 @@ export interface AutomationRun {
   object: 'automation_run';
   jobs_created: number;
   job_ids?: string[];
+  /** Queue automations: messages read in this batch. */
+  messages_received?: number;
+  /** Queue automations: messages handled and removed from the queue. */
+  messages_deleted?: number;
 }
 
 export interface AutomationItem {
