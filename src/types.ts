@@ -815,6 +815,51 @@ export interface Usage {
   series: UsagePoint[];
 }
 
+export interface InputReportParams {
+  /** `YYYY-MM-DD`; default 29 days before `to`. */
+  from?: string;
+  /** `YYYY-MM-DD`; default today. */
+  to?: string;
+}
+
+/** Totals for a set of inputs. */
+export interface InputTotals {
+  files: number;
+  size_bytes: number;
+  input_minutes: number;
+  billable_minutes: number;
+}
+
+/** One kind of input, `container/codec`: `mp4/h264`, `mkv/hevc`, `m4a/audio`. */
+export interface InputKind extends InputTotals {
+  /** `container/codec`, or `other` for the kinds past the seven most common. */
+  kind: string;
+  container: string | null;
+  video_codec: string | null;
+}
+
+/** The inputs of one kind in one duration × size bucket (log scale, 4 per decade). */
+export interface InputPoint extends InputTotals {
+  kind: string;
+  /** Where to plot the point. */
+  mean_duration_seconds: number;
+  mean_size_bytes: number;
+  /** The bucket's bounds: `[low, high)`. */
+  duration_range: [number, number];
+  size_range: [number, number];
+}
+
+export interface InputReport {
+  object: 'input_report';
+  from: string;
+  to: string;
+  /** Inputs not probed yet, or with no duration or size: counted, not plotted. */
+  unmeasured: number;
+  /** Most files first; `other` last. */
+  kinds: InputKind[];
+  points: InputPoint[];
+}
+
 /** Price per output minute, in dollars. The same for every plan and codec. */
 export interface RateCard {
   unit: 'output_minute';

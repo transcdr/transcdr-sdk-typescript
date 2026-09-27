@@ -127,7 +127,7 @@ Every method also takes a trailing `RequestOptions` (`signal`, `timeoutMs`, `max
 | `presets` | `list`, `listAll`, `create`, `retrieve` (id or slug), `update`, `del` |
 | `webhooks` | `list`, `listAll`, `create` (HTTPS, SNS, SQS or through a connection), `retrieve`, `update`, `del`, `rotateSecret`, `test`, `check`, `checkSaved`, `deliveries`, `redeliver`, `verifySignature`, `verifySnsSqsSignature`, `constructEvent` |
 | `events` | `list`, `retrieve` |
-| `usage` | `retrieve({ from, to, granularity })` |
+| `usage` | `retrieve({ from, to, granularity })`, `inputs({ from, to })` (inputs by duration, size and kind) |
 | `billing` | `retrieve`, `checkout({ plan } \| { creditCents })`, `portal`, `updateSettings`, `transactions`, `changePlan`, `invoices.list` (monthly statements) |
 | `plans` | `list` |
 | `capabilities` | `retrieve` |
@@ -445,7 +445,7 @@ if (!report.roles.destination) console.log(JSON.stringify(report.setup?.iam_poli
 ## Types
 
 Every API object is exported as a type: `Job`, `OutputSpec`, `OutputSpecInput`, `Rendition`, `Asset`, `Upload`,
-`Preset`, `WebhookEndpoint`, `WebhookDelivery`, `ConnectionCheck`, `WebhookCheck`, `Event`, `ApiKey`, `Organization`, `User`, `Membership`, `Usage`, `Plan`, `Billing`,
+`Preset`, `WebhookEndpoint`, `WebhookDelivery`, `ConnectionCheck`, `WebhookCheck`, `Event`, `ApiKey`, `Organization`, `User`, `Membership`, `Usage`, `InputReport`, `Plan`, `Billing`,
 `CreditAccount`, `CreditTransaction`, `Statement`, `Announcement`, `ServiceCredit`, `MediaInfo`, `ListResponse<T>` and more, plus constants such as `JOB_STATUSES`, `EVENT_TYPES` and `SCOPES`.
 
 ## License

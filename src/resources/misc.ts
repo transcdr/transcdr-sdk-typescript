@@ -10,6 +10,8 @@ import type {
   CreditTransactionListParams,
   Event,
   EventListParams,
+  InputReport,
+  InputReportParams,
   Job,
   ListParams,
   ListResponse,
@@ -82,6 +84,14 @@ export class Events extends Resource {
 export class UsageResource extends Resource {
   retrieve(params: UsageParams = {}, options?: RequestOptions): Promise<Usage> {
     return this.core.request('GET', '/v1/usage', { ...options, query: { ...params } });
+  }
+
+  /**
+   * The inputs the range's jobs read, bucketed by duration, size and kind
+   * (`container/codec`), for a duration × size chart.
+   */
+  inputs(params: InputReportParams = {}, options?: RequestOptions): Promise<InputReport> {
+    return this.core.request('GET', '/v1/usage/inputs', { ...options, query: { ...params } });
   }
 }
 
