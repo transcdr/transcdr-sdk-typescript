@@ -378,6 +378,25 @@ export interface UploadCreateParams {
 // Presets
 // ---------------------------------------------------------------------------
 
+/**
+ * The group a preset is shown in: `web` (a single MP4 for browsers), `mobile` (native iOS and Android),
+ * `streaming` (adaptive HLS), `tv` (smart TVs, set-top boxes, constant bit rate), `social` (portrait),
+ * `audio` (audio-only) and `archive` (visually lossless, HDR). More may be added.
+ */
+export type PresetCategory = 'web' | 'mobile' | 'streaming' | 'tv' | 'social' | 'audio' | 'archive' | (string & {});
+
+/** Every category, in display order. */
+export const PRESET_CATEGORIES = ['web', 'mobile', 'streaming', 'tv', 'social', 'audio', 'archive'] as const;
+
+/**
+ * Where an output plays: `web` (current Chrome, Edge, Firefox, Safari), `ios`, `android`, `smart_tv`,
+ * `legacy` (old browsers and devices, set-top boxes) and `editing` (editing applications). More may be added.
+ */
+export type Platform = 'web' | 'ios' | 'android' | 'smart_tv' | 'legacy' | 'editing' | (string & {});
+
+/** Every platform, in display order. */
+export const PLATFORMS = ['web', 'ios', 'android', 'smart_tv', 'legacy', 'editing'] as const;
+
 export interface Preset {
   object: 'preset';
   /** `pre_…`, or the slug for system presets. */
@@ -386,10 +405,25 @@ export interface Preset {
   name: string;
   description: string;
   system: boolean;
+  /** Its own, else derived from `output`. */
+  category: PresetCategory;
+  /** The platforms the output plays on: its own, else derived from `output`. */
+  compatibility: Platform[];
+  /** Minimum versions and conditions, by platform in `compatibility`. */
+  compatibility_notes: Partial<Record<Platform, string>>;
   output: OutputSpec;
   metadata: Metadata;
   created_at: Timestamp | null;
   updated_at: Timestamp | null;
+}
+
+export interface PresetListParams extends ListParams {
+  /** Any of these categories. */
+  category?: PresetCategory | PresetCategory[];
+  /** Every one of these platforms. */
+  compatible_with?: Platform | Platform[];
+  /** `false` leaves out the system presets. */
+  system?: boolean;
 }
 
 export interface PresetCreateParams {
@@ -398,20 +432,33 @@ export interface PresetCreateParams {
   description?: string;
   output: OutputSpecInput;
   metadata?: Metadata;
+  /** Left out: derived from `output`. */
+  category?: PresetCategory;
+  /** The platforms to claim. Left out: derived from `output`. */
+  compatibility?: Platform[];
+  /** Notes over the derived ones, only for platforms claimed; 1–500 characters each. */
+  compatibility_notes?: Partial<Record<Platform, string>>;
 }
 
-/** `PATCH`: fields left out are unchanged; `output` merges into the stored spec; `null` clears. */
+/**
+ * `PATCH`: fields left out are unchanged; `output` merges into the stored spec; `null` clears
+ * (`category`, `compatibility` and `compatibility_notes` are then derived from `output` again).
+ */
 export interface PresetUpdateParams {
   name?: string;
   slug?: string;
   description?: string | null;
   output?: OutputSpecInput;
   metadata?: Metadata | null;
+  category?: PresetCategory | null;
+  compatibility?: Platform[] | null;
+  compatibility_notes?: Partial<Record<Platform, string>> | null;
 }
 
 /**
  * `PUT`: the whole preset. `output` is the full spec (fields left out take their defaults);
- * `description` and `metadata` left out are emptied; `slug` left out is kept.
+ * `description` and `metadata` left out are emptied; `category`, `compatibility` and
+ * `compatibility_notes` left out are derived again; `slug` left out is kept.
  */
 export interface PresetReplaceParams {
   name: string;
@@ -419,6 +466,9 @@ export interface PresetReplaceParams {
   slug?: string;
   description?: string;
   metadata?: Metadata;
+  category?: PresetCategory;
+  compatibility?: Platform[];
+  compatibility_notes?: Partial<Record<Platform, string>>;
 }
 
 // ---------------------------------------------------------------------------

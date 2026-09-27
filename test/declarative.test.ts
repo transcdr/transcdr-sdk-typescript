@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { InvalidRequestError, Transcdr, isSession, type Connection, type WebhookEndpoint } from '../src';
+import { InvalidRequestError, PLATFORMS, PRESET_CATEGORIES, Transcdr, isSession, type Connection, type WebhookEndpoint } from '../src';
 import { json, mockFetch } from './helpers';
 
 function client(fetch: ReturnType<typeof mockFetch>['fetch'], maxRetries = 2) {
@@ -82,6 +82,60 @@ describe('presets', () => {
     await client(fetch).presets.update('pre_1', { description: null, metadata: null });
     expect(calls[0].method).toBe('PATCH');
     expect(calls[0].body).toEqual({ description: null, metadata: null });
+  });
+
+  it('filters by category and platforms, comma-joined', async () => {
+    const page = { object: 'list', data: [], has_more: false, next_cursor: null };
+    const { fetch, calls } = mockFetch(json(page), json(page), json(page));
+    const t = client(fetch);
+    await t.presets.list({ category: ['web', 'mobile'], compatible_with: ['ios', 'android'], limit: 5 });
+    await t.presets.list({ category: 'streaming', compatible_with: 'smart_tv', system: false });
+    await t.presets.list({ category: [] });
+    const first = new URL(calls[0].url).searchParams;
+    expect(first.get('category')).toBe('web,mobile');
+    expect(first.get('compatible_with')).toBe('ios,android');
+    expect(first.get('limit')).toBe('5');
+    const second = new URL(calls[1].url).searchParams;
+    expect(second.get('category')).toBe('streaming');
+    expect(second.get('compatible_with')).toBe('smart_tv');
+    expect(second.get('system')).toBe('false');
+    expect(new URL(calls[2].url).search).toBe('');
+  });
+
+  it('sets and clears category and compatibility', async () => {
+    const { fetch, calls } = mockFetch(json(preset), json(preset));
+    const t = client(fetch);
+    await t.presets.create({
+      name: 'Mine',
+      output: { codec: 'h264' },
+      category: 'tv',
+      compatibility: ['smart_tv', 'legacy'],
+      compatibility_notes: { smart_tv: 'Our set-top box app.' },
+    });
+    await t.presets.update('pre_1', { category: null, compatibility: null, compatibility_notes: null });
+    expect(calls[0].body).toMatchObject({
+      category: 'tv',
+      compatibility: ['smart_tv', 'legacy'],
+      compatibility_notes: { smart_tv: 'Our set-top box app.' },
+    });
+    expect(calls[1].body).toEqual({ category: null, compatibility: null, compatibility_notes: null });
+  });
+
+  it('reads category, compatibility and notes, keeping unknown values', async () => {
+    const { fetch } = mockFetch(
+      json({
+        ...preset,
+        category: 'podcast',
+        compatibility: ['web', 'vr_headset'],
+        compatibility_notes: { web: 'Every current browser.' },
+      }),
+    );
+    const got = await client(fetch).presets.retrieve('pre_1');
+    expect(got.category).toBe('podcast');
+    expect(got.compatibility).toEqual(['web', 'vr_headset']);
+    expect(got.compatibility_notes.web).toBe('Every current browser.');
+    expect(PRESET_CATEGORIES).toContain('archive');
+    expect(PLATFORMS).toEqual(['web', 'ios', 'android', 'smart_tv', 'legacy', 'editing']);
   });
 });
 

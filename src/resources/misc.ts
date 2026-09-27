@@ -20,6 +20,7 @@ import type {
   Portal,
   Preset,
   PresetCreateParams,
+  PresetListParams,
   PresetReplaceParams,
   PresetUpdateParams,
   ProbeParams,
@@ -44,12 +45,26 @@ export class Probe extends Resource {
 }
 
 export class Presets extends Resource {
-  /** System presets and your organization's presets. */
-  list(params: ListParams = {}, options?: RequestOptions): PagePromise<Preset> {
-    return this.core.list('/v1/presets', { ...params }, options);
+  /**
+   * System presets and your organization's presets. `category` keeps any of the categories given,
+   * `compatible_with` only presets that play on every platform given.
+   */
+  list(params: PresetListParams = {}, options?: RequestOptions): PagePromise<Preset> {
+    const { category, compatible_with, system, ...page } = params;
+    const joined = (v: string | string[] | undefined) => (Array.isArray(v) ? v.join(',') || undefined : v);
+    return this.core.list(
+      '/v1/presets',
+      {
+        ...page,
+        category: joined(category),
+        compatible_with: joined(compatible_with),
+        system: system === false ? 'false' : undefined,
+      },
+      options,
+    );
   }
 
-  listAll(params: ListParams = {}, max?: number): Promise<Preset[]> {
+  listAll(params: PresetListParams = {}, max?: number): Promise<Preset[]> {
     return this.list(params).toArray(max);
   }
 

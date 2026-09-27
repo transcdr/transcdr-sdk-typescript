@@ -14,7 +14,7 @@ with MP4 and CMAF/HLS output, behind one small REST API.
 The package is installed from GitHub (it is not on the npm registry); it builds on install:
 
 ```sh
-npm install github:transcdr/transcdr-sdk-typescript#v0.4.0
+npm install github:transcdr/transcdr-sdk-typescript#v0.5.0
 ```
 
 It is imported as `@transcdr/sdk`.
@@ -128,7 +128,7 @@ Every method also takes a trailing `RequestOptions` (`signal`, `timeoutMs`, `max
 | `assets` | `list`, `listAll`, `create` (link by URL), `retrieve`, `contentUrl`, `del` |
 | `jobs` | `create`, `list`, `listAll`, `retrieve`, `cancel`, `retry`, `del`, `events`, `outputs`, `outputUrl`, `fileUrl`, `waitFor`, `deliveries`, `deliver` |
 | `probe` | `create({ input, wait })` |
-| `presets` | `list`, `listAll`, `create`, `retrieve` (id or slug), `update` (PATCH: `output` merges), `replace` (PUT: the whole preset), `del` |
+| `presets` | `list` / `listAll` (filter by `category`, `compatible_with`), `create`, `retrieve` (id or slug), `update` (PATCH: `output` merges), `replace` (PUT: the whole preset), `del` |
 | `webhooks` | `list`, `listAll`, `create` (HTTPS, SNS, SQS or through a connection), `retrieve`, `update`, `del`, `rotateSecret`, `test`, `check`, `checkSaved`, `deliveries`, `redeliver`, `verifySignature`, `verifySnsSqsSignature`, `constructEvent` |
 | `events` | `list`, `retrieve` |
 | `usage` | `retrieve({ from, to, granularity })`, `inputs({ from, to })` (inputs by duration, size and kind) |
@@ -268,12 +268,37 @@ await transcdr.jobs.create(params, { idempotencyKey: `video-${video.id}` });
 The same key with a different body is refused with 409 `idempotency_key_reused`. Only a successful create is
 remembered, so after an error the key can be used again.
 
+## Where a preset plays
+
+Every preset has a `category` (`web`, `mobile`, `streaming`, `tv`, `social`, `audio`, `archive`), the group the
+dashboard shows it in, and `compatibility`: the platforms its output plays on (`web`, `ios`, `android`, `smart_tv`,
+`legacy`, `editing`), with a note for each giving minimum versions and conditions. Both are derived from the output
+spec. A platform is listed only when the codec, the container and the audio all play there; with `audio: 'auto'`, a
+source whose audio is not AAC gets Opus, and the notes say which platforms need a newer version for that.
+
+```ts
+// Presets that play on iPhones and Android phones.
+const both = await transcdr.presets.listAll({ compatible_with: ['ios', 'android'] });
+// Web or social presets.
+const page = await transcdr.presets.list({ category: ['web', 'social'] });
+for (const preset of page.data) {
+  console.log(preset.slug, preset.category, preset.compatibility, preset.compatibility_notes.ios);
+}
+// Your own preset may state its own; null derives them again.
+await transcdr.presets.update('pre_…', { category: 'tv', compatibility: ['smart_tv', 'legacy'] });
+await transcdr.presets.update('pre_…', { category: null, compatibility: null, compatibility_notes: null });
+```
+
+`PRESET_CATEGORIES` and `PLATFORMS` list the known values in display order; more may be added, so handle a value
+you do not know.
+
 ## Updating: left out, or null
 
 `update` methods send `PATCH`: a field left out keeps its value, and an explicit `null` clears it. That covers an
 automation's `destination`, `preset`, `output`, `metadata`, `webhook_url` and `trigger_connection_id`; a webhook's
 `description`, `aws.endpoint` and `aws.message_group_id`; a connection's `config` fields and storage `secrets`; a
-preset's `description` and `metadata`; and the organization's `billing_email`.
+preset's `description` and `metadata` (and `category`, `compatibility` and `compatibility_notes`, which are then
+derived from `output` again); and the organization's `billing_email`.
 
 ```ts
 await transcdr.automations.update('aut_…', { destination: null, webhook_url: null });
