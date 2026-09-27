@@ -128,3 +128,52 @@ export async function constructEvent<T = Event>(
   const text = typeof payload === 'string' ? payload : new TextDecoder().decode(toBytes(payload));
   return JSON.parse(text) as T;
 }
+
+// ---------------------------------------------------------------------------
+// Amazon SNS / SQS destinations
+// ---------------------------------------------------------------------------
+
+/** Message attribute that carries the signature on SNS and SQS deliveries. */
+export const SIGNATURE_ATTRIBUTE = 'transcdr-signature';
+
+/**
+ * One message attribute in any of the shapes AWS hands it over:
+ * SQS `ReceiveMessage` / AWS SDK (`StringValue`), Lambda SQS events (`stringValue`),
+ * SNS notification JSON (`Value`), or a plain string.
+ */
+export type MessageAttributeValue =
+  | string
+  | { StringValue?: string; stringValue?: string; Value?: string; DataType?: string; dataType?: string; Type?: string };
+
+/** A message-attribute map as received from SNS or SQS, or the attribute value itself. */
+export type SignatureAttributes = Record<string, MessageAttributeValue | undefined> | string | null | undefined;
+
+/** Read the `transcdr-signature` value out of an SNS/SQS message-attribute map (any AWS shape). */
+export function signatureFromAttributes(attributes: SignatureAttributes): string | null {
+  if (attributes == null) return null;
+  if (typeof attributes === 'string') return attributes;
+  const key = Object.keys(attributes).find((k) => k.toLowerCase() === SIGNATURE_ATTRIBUTE);
+  const value = key === undefined ? undefined : attributes[key];
+  if (value == null) return null;
+  if (typeof value === 'string') return value;
+  return value.StringValue ?? value.stringValue ?? value.Value ?? null;
+}
+
+/**
+ * Verify an Amazon SNS or SQS delivery. The scheme is the webhook one: the
+ * `transcdr-signature` attribute is `t=<unix>,v1=<hmac>` over `"<t>.<message>"`.
+ *
+ * `message` is the SNS `Message` or the SQS `MessageBody` (Lambda: `record.body`),
+ * exactly as received. `attributes` is the message-attribute map in any AWS shape,
+ * or the attribute value itself. With raw message delivery off, an SNS → SQS
+ * subscription wraps the notification: parse the body and pass its `Message` and
+ * `MessageAttributes` instead.
+ */
+export function verifySnsSqsSignature(
+  message: string | Uint8Array | ArrayBuffer,
+  attributes: SignatureAttributes,
+  secret: string,
+  toleranceSec: number | VerifyOptions = DEFAULT_TOLERANCE_SECONDS,
+): Promise<boolean> {
+  return verifySignature(message, signatureFromAttributes(attributes), secret, toleranceSec);
+}

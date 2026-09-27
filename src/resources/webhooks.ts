@@ -1,6 +1,12 @@
 import type { RequestOptions } from '../core';
 import type { PagePromise } from '../pagination';
-import { constructEvent, verifySignature, type VerifyOptions } from '../signature';
+import {
+  constructEvent,
+  verifySignature,
+  verifySnsSqsSignature,
+  type SignatureAttributes,
+  type VerifyOptions,
+} from '../signature';
 import type {
   Event,
   ListParams,
@@ -21,7 +27,10 @@ export class Webhooks extends Resource {
     return this.list(params).toArray(max);
   }
 
-  /** The returned endpoint carries `secret`: store it now, it is not shown again. */
+  /**
+   * Create an HTTPS, Amazon SNS or Amazon SQS destination.
+   * The returned endpoint carries `secret`: store it now, it is not shown again.
+   */
   create(params: WebhookCreateParams, options?: RequestOptions): Promise<WebhookEndpoint> {
     return this.core.request('POST', '/v1/webhooks', { ...options, body: params });
   }
@@ -68,6 +77,19 @@ export class Webhooks extends Resource {
     toleranceSec: number | VerifyOptions = 300,
   ): Promise<boolean> {
     return verifySignature(payload, header, secret, toleranceSec);
+  }
+
+  /**
+   * Verify an Amazon SNS or SQS delivery: `message` is the SNS `Message` or SQS body,
+   * `attributes` its message attributes (any AWS shape) or the `transcdr-signature` value.
+   */
+  verifySnsSqsSignature(
+    message: string | Uint8Array | ArrayBuffer,
+    attributes: SignatureAttributes,
+    secret: string,
+    toleranceSec: number | VerifyOptions = 300,
+  ): Promise<boolean> {
+    return verifySnsSqsSignature(message, attributes, secret, toleranceSec);
   }
 
   /** Verify and parse a delivery; throws when the signature is invalid. */

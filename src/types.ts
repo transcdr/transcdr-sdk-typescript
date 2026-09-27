@@ -413,29 +413,103 @@ export const EVENT_TYPES: readonly EventType[] = [
   'webhook.test',
 ];
 
+/** Where an event destination sends events. */
+export type WebhookEndpointType = 'https' | 'sns' | 'sqs';
+
+export const WEBHOOK_ENDPOINT_TYPES: readonly WebhookEndpointType[] = ['https', 'sns', 'sqs'];
+
+/** AWS settings of an `sns` or `sqs` destination, as returned by the API. The secret access key is never returned. */
+export interface WebhookAwsConfig {
+  region: string;
+  access_key_id: string;
+  /** An SNS/SQS-compatible service endpoint, when not AWS itself. */
+  endpoint: string | null;
+  /** FIFO topics and queues only. */
+  message_group_id: string | null;
+  /** Always true: a secret access key is stored (it is write-only). */
+  secret_access_key_set: boolean;
+}
+
+/** AWS settings sent on create. */
+export interface WebhookAwsParams {
+  access_key_id: string;
+  secret_access_key: string;
+  /** Derived from the topic ARN or queue URL when omitted. */
+  region?: string;
+  /** An SNS/SQS-compatible service endpoint. */
+  endpoint?: string;
+  /** FIFO topics and queues only. Default `"transcdr"`. */
+  message_group_id?: string;
+}
+
+/** AWS settings sent on update. Omit `secret_access_key` to keep the stored one. */
+export interface WebhookAwsUpdateParams {
+  access_key_id?: string;
+  secret_access_key?: string;
+  region?: string;
+  endpoint?: string | null;
+  message_group_id?: string | null;
+}
+
+/** An event destination: an HTTPS webhook, an Amazon SNS topic or an Amazon SQS queue. */
 export interface WebhookEndpoint {
   object: 'webhook_endpoint';
   id: string;
+  /** `https` for endpoints created before destinations had a type. */
+  type: WebhookEndpointType;
+  /** The HTTPS URL; for `sns`/`sqs` the topic ARN or queue URL. */
   url: string;
+  /** `sns` only. */
+  topic_arn: string | null;
+  /** `sqs` only. */
+  queue_url: string | null;
+  /** `sns`/`sqs` only. */
+  aws: WebhookAwsConfig | null;
   description: string;
   /** Event types, or `["*"]`. */
   events: string[];
   enabled: boolean;
-  /** Only present on create and rotate. */
+  /** Only present on create and rotate. Signs the `Transcdr-Signature` header or the `transcdr-signature` attribute. */
   secret?: string;
   created_at: Timestamp;
+  updated_at?: Timestamp;
   last_delivery_at: Timestamp | null;
   failure_count: number;
 }
 
-export interface WebhookCreateParams {
+export interface WebhookHttpsCreateParams {
+  type?: 'https';
   url: string;
   events?: string[];
   description?: string;
 }
 
+export interface WebhookSnsCreateParams {
+  type: 'sns';
+  /** e.g. `arn:aws:sns:us-east-1:123456789012:transcdr-events` (`.fifo` for FIFO topics). */
+  topic_arn: string;
+  aws: WebhookAwsParams;
+  events?: string[];
+  description?: string;
+}
+
+export interface WebhookSqsCreateParams {
+  type: 'sqs';
+  /** e.g. `https://sqs.us-east-1.amazonaws.com/123456789012/transcdr-events`. */
+  queue_url: string;
+  aws: WebhookAwsParams;
+  events?: string[];
+  description?: string;
+}
+
+export type WebhookCreateParams = WebhookHttpsCreateParams | WebhookSnsCreateParams | WebhookSqsCreateParams;
+
+/** `type` cannot change after creation. */
 export interface WebhookUpdateParams {
   url?: string;
+  topic_arn?: string;
+  queue_url?: string;
+  aws?: WebhookAwsUpdateParams;
   events?: string[];
   description?: string;
   enabled?: boolean;

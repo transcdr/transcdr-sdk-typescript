@@ -97,7 +97,7 @@ Every method also takes a trailing `RequestOptions` (`signal`, `timeoutMs`, `max
 | `jobs` | `create`, `list`, `listAll`, `retrieve`, `cancel`, `retry`, `del`, `events`, `outputs`, `outputUrl`, `fileUrl`, `waitFor`, `deliveries`, `deliver` |
 | `probe` | `create({ input, wait })` |
 | `presets` | `list`, `listAll`, `create`, `retrieve` (id or slug), `update`, `del` |
-| `webhooks` | `list`, `listAll`, `create`, `retrieve`, `update`, `del`, `rotateSecret`, `test`, `deliveries`, `redeliver`, `verifySignature`, `constructEvent` |
+| `webhooks` | `list`, `listAll`, `create` (HTTPS, SNS or SQS), `retrieve`, `update`, `del`, `rotateSecret`, `test`, `deliveries`, `redeliver`, `verifySignature`, `verifySnsSqsSignature`, `constructEvent` |
 | `events` | `list`, `retrieve` |
 | `usage` | `retrieve({ from, to, granularity })` |
 | `billing` | `retrieve`, `checkout({ plan } \| { creditCents })`, `portal`, `updateSettings`, `transactions`, `changePlan`, `invoices.list` (monthly statements) |
@@ -252,6 +252,44 @@ export async function POST(request: Request): Promise<Response> {
 
 `verifySignature`, `constructEvent`, `signPayload` (for testing your receiver) and `computeSignature` are also
 exported as standalone functions. Deliveries may repeat or arrive out of order: deduplicate on `event.id`.
+
+### Amazon SNS and SQS destinations
+
+An endpoint can also publish to an Amazon SNS topic or send to an Amazon SQS queue. The API stores the secret access
+key and never returns it (`aws.secret_access_key_set` is `true`); on update, omit it to keep the stored one.
+
+```ts
+const topic = await transcdr.webhooks.create({
+  type: 'sns',
+  topic_arn: 'arn:aws:sns:us-east-1:123456789012:transcdr-events',
+  aws: { access_key_id: process.env.AWS_KEY_ID!, secret_access_key: process.env.AWS_SECRET!, region: 'us-east-1' },
+  events: ['job.completed', 'job.failed'],
+});
+console.log(topic.secret); // whsec_…, signs the transcdr-signature message attribute
+
+await transcdr.webhooks.update(topic.id, { aws: { access_key_id: 'AKIA…', secret_access_key: 'rotated' } });
+```
+
+The message (SNS `Message`, SQS `MessageBody`) is the same event JSON a webhook receives, and the
+`transcdr-signature` message attribute uses the webhook scheme. `verifySnsSqsSignature` accepts the attribute map in
+any AWS shape (Lambda SQS events, `ReceiveMessage`, SNS notification JSON) or the bare value:
+
+```ts
+import { verifySnsSqsSignature } from '@transcdr/sdk';
+import type { SQSHandler } from 'aws-lambda';
+
+export const handler: SQSHandler = async (sqsEvent) => {
+  for (const record of sqsEvent.Records) {
+    const ok = await verifySnsSqsSignature(record.body, record.messageAttributes, process.env.TRANSCDR_SECRET!, 3600);
+    if (!ok) throw new Error('invalid signature');
+    const event = JSON.parse(record.body);
+    // …
+  }
+};
+```
+
+Messages can wait in a queue, so pass a tolerance longer than the default 300 seconds (or `Infinity`, relying on the
+event id for de-duplication) when you consume a backlog.
 
 ## Test mode
 
