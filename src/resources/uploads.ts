@@ -1,4 +1,4 @@
-import { idempotencyKey, type RequestOptions } from '../core';
+import type { RequestOptions } from '../core';
 import { ConnectionError, errorFromResponse } from '../errors';
 import type { Asset, Metadata, Upload, UploadCreateParams } from '../types';
 import { Resource, seg } from './base';
@@ -42,8 +42,7 @@ function parseMaybeJson(text: string): unknown {
 export class Uploads extends Resource {
   /** Open an upload session. Retries are made safe with an automatic idempotency key. */
   create(params: UploadCreateParams, options: RequestOptions = {}): Promise<Upload> {
-    const key = options.idempotencyKey ?? (this.core.maxRetries > 0 ? idempotencyKey() : undefined);
-    return this.core.request('POST', '/v1/uploads', { ...options, body: params, idempotencyKey: key });
+    return this.core.create('/v1/uploads', params, options);
   }
 
   /** Mark the upload finished; returns the ready asset. */

@@ -1,4 +1,4 @@
-import { idempotencyKey, type RequestOptions } from '../core';
+import type { RequestOptions } from '../core';
 import { WaitTimeoutError } from '../errors';
 import type { PagePromise } from '../pagination';
 import {
@@ -27,17 +27,16 @@ export interface WaitForOptions {
 
 export class Jobs extends Resource {
   /**
-   * Submit a job. When retries are enabled an `Idempotency-Key` is generated
-   * automatically so a retried request never creates a duplicate job.
+   * Submit a job. An `Idempotency-Key` is generated automatically (unless you pass one)
+   * so a retried request never creates a duplicate job.
    *
    * `maxCostCents` (or `max_cost_cents`) caps what the job may cost: it is
    * refused with `cost_limit_exceeded` rather than run over the cap.
    */
   create(params: JobCreateParams & { maxCostCents?: number }, options: RequestOptions = {}): Promise<Job> {
-    const key = options.idempotencyKey ?? (this.core.maxRetries > 0 ? idempotencyKey() : undefined);
     const { maxCostCents, ...rest } = params;
     const body: JobCreateParams = maxCostCents === undefined ? rest : { ...rest, max_cost_cents: maxCostCents };
-    return this.core.request('POST', '/v1/jobs', { ...options, body, idempotencyKey: key });
+    return this.core.create('/v1/jobs', body, options);
   }
 
   /** One page of jobs (await it), or every job (`.autoPaginate()`). Newest first. */

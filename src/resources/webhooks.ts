@@ -33,7 +33,7 @@ export class Webhooks extends Resource {
    * connection (`{ connection_id }`). The returned endpoint carries `secret`: store it now, it is not shown again.
    */
   create(params: WebhookCreateParams, options?: RequestOptions): Promise<WebhookEndpoint> {
-    return this.core.request('POST', '/v1/webhooks', { ...options, body: params });
+    return this.core.create('/v1/webhooks', params, options);
   }
 
   retrieve(id: string, options?: RequestOptions): Promise<WebhookEndpoint> {

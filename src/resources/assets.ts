@@ -15,7 +15,7 @@ export class Assets extends Resource {
 
   /** Link a remote file by URL. The asset is `ready` at once; jobs read the URL directly. */
   create(params: AssetImportParams, options?: RequestOptions): Promise<Asset> {
-    return this.core.request('POST', '/v1/assets', { ...options, body: params });
+    return this.core.create('/v1/assets', params, options);
   }
 
   retrieve(id: string, options?: RequestOptions): Promise<Asset> {

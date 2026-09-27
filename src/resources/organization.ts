@@ -11,6 +11,7 @@ import type {
   Role,
   User,
 } from '../types';
+import { isSession } from '../types';
 import { Resource, seg } from './base';
 
 export class Members extends Resource {
@@ -23,7 +24,7 @@ export class Members extends Resource {
    * creates the user, with `name` and `password`.
    */
   create(params: MemberCreateParams, options?: RequestOptions): Promise<User> {
-    return this.core.request('POST', '/v1/organization/members', { ...options, body: params });
+    return this.core.create('/v1/organization/members', params, options);
   }
 
   update(id: string, params: { role: Role }, options?: RequestOptions): Promise<User> {
@@ -41,7 +42,8 @@ export class Members extends Resource {
    */
   async leave(options?: RequestOptions): Promise<void> {
     const me = await this.core.request<Me>('GET', '/v1/me', options);
-    if (!me.user) throw new TypeError('members.leave() needs a session token, not an API key');
+    // With an API key, `user` is the key's creator: leaving would remove them.
+    if (!isSession(me) || !me.user) throw new TypeError('members.leave() needs a session token, not an API key');
     await this.del(me.user.id, options);
   }
 }
@@ -74,6 +76,6 @@ export class Organizations extends Resource {
    * the current token keeps working.
    */
   create(params: OrganizationCreateParams, options?: RequestOptions): Promise<AuthResponse> {
-    return this.core.request('POST', '/v1/organizations', { ...options, body: params });
+    return this.core.create('/v1/organizations', params, options);
   }
 }

@@ -63,12 +63,12 @@ describe('requests', () => {
     expect(calls[0].headers['idempotency-key']).not.toBe(calls[1].headers['idempotency-key']);
   });
 
-  it('honours an explicit idempotency key and omits it when retries are off', async () => {
+  it('honours an explicit idempotency key and sends one even when retries are off', async () => {
     const { fetch, calls } = mockFetch(json(job('job_1')), json(job('job_2')));
     await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' } }, { idempotencyKey: 'mine' });
     await client(fetch, { maxRetries: 0 }).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' } });
     expect(calls[0].headers['idempotency-key']).toBe('mine');
-    expect(calls[1].headers['idempotency-key']).toBeUndefined();
+    expect(calls[1].headers['idempotency-key']).toMatch(/.{16,}/);
   });
 
   it('serialises list filters, including metadata[key]=value', () => {

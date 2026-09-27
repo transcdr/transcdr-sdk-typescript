@@ -4,6 +4,17 @@
 /** RFC 3339 UTC timestamp, e.g. `2026-09-26T12:00:00Z`. */
 export type Timestamp = string;
 
+/**
+ * A write-only secret that is set. The fingerprint changes when the secret changes and says nothing else
+ * (it is keyed by the server and bound to the object and field): compare it with an earlier read to
+ * notice a change made elsewhere.
+ */
+export interface SecretFingerprint {
+  set: true;
+  /** `hmac-sha256:<12 hex>`. */
+  fingerprint: string;
+}
+
 /** String-to-string metadata: up to 20 keys (≤ 40 chars), values ≤ 500 chars. */
 export type Metadata = Record<string, string>;
 
@@ -389,7 +400,26 @@ export interface PresetCreateParams {
   metadata?: Metadata;
 }
 
-export type PresetUpdateParams = Partial<PresetCreateParams>;
+/** `PATCH`: fields left out are unchanged; `output` merges into the stored spec; `null` clears. */
+export interface PresetUpdateParams {
+  name?: string;
+  slug?: string;
+  description?: string | null;
+  output?: OutputSpecInput;
+  metadata?: Metadata | null;
+}
+
+/**
+ * `PUT`: the whole preset. `output` is the full spec (fields left out take their defaults);
+ * `description` and `metadata` left out are emptied; `slug` left out is kept.
+ */
+export interface PresetReplaceParams {
+  name: string;
+  output: OutputSpecInput;
+  slug?: string;
+  description?: string;
+  metadata?: Metadata;
+}
 
 // ---------------------------------------------------------------------------
 // Webhooks and events
@@ -455,7 +485,10 @@ export interface WebhookAwsParams {
   message_group_id?: string;
 }
 
-/** AWS settings sent on update. Omit `secret_access_key` to keep the stored one. */
+/**
+ * AWS settings sent on update. Omit `secret_access_key` to keep the stored one. `null` clears
+ * `endpoint` and `message_group_id` (`""` leaves them unchanged).
+ */
 export interface WebhookAwsUpdateParams {
   access_key_id?: string;
   secret_access_key?: string;
@@ -484,6 +517,8 @@ export interface WebhookEndpoint {
   enabled: boolean;
   /** Only present on create and rotate. Signs the `Transcdr-Signature` header or the `transcdr-signature` attribute. */
   secret?: string;
+  /** The write-only secrets that are set, with their fingerprints (`secret_access_key`: sns/sqs). */
+  secrets?: WebhookSecrets;
   created_at: Timestamp;
   updated_at?: Timestamp;
   last_delivery_at: Timestamp | null;
@@ -493,6 +528,11 @@ export interface WebhookEndpoint {
    * endpoint carries its own target. The connection's health and `enabled` flag then apply.
    */
   connection_id: string | null;
+}
+
+export interface WebhookSecrets {
+  secret?: SecretFingerprint;
+  secret_access_key?: SecretFingerprint;
 }
 
 export interface WebhookHttpsCreateParams {
@@ -554,14 +594,14 @@ export interface ConnectionDisabledEvent {
   automations: string[];
 }
 
-/** `type` cannot change after creation. */
+/** `type` cannot change after creation. Fields left out are unchanged; `null` clears `description`. */
 export interface WebhookUpdateParams {
   url?: string;
   topic_arn?: string;
   queue_url?: string;
   aws?: WebhookAwsUpdateParams;
   events?: string[];
-  description?: string;
+  description?: string | null;
   enabled?: boolean;
 }
 
@@ -653,6 +693,8 @@ export interface ApiKey {
   mode: KeyMode;
   last_used_at: Timestamp | null;
   expires_at: Timestamp | null;
+  /** Always null on keys the API returns: `retrieve` is 404 once a key is revoked. */
+  revoked_at?: Timestamp | null;
   created_at: Timestamp;
   /** Only present on create. */
   secret?: string;
@@ -695,7 +737,8 @@ export interface Organization {
 
 export interface OrganizationUpdateParams {
   name?: string;
-  billing_email?: string;
+  /** `null` (or `""`) clears it. */
+  billing_email?: string | null;
 }
 
 export interface User {
@@ -762,16 +805,27 @@ export interface AuthResponse {
 }
 
 export interface Me {
-  /** Null when authenticated with an API key. */
+  object?: 'me';
+  /**
+   * The signed-in user, or for an API key the user who created the key. A non-null `user` does not
+   * mean a session: use `isSession(me)`.
+   */
   user: User | null;
   organization: Organization;
-  /** Every organization the user belongs to; empty for API keys. */
+  /** Every organization the user belongs to (sessions); always empty for API keys. */
   organizations: Membership[];
-  /** The key in use, when authenticated with an API key. */
+  /** The token presented: a session's `prefix` starts `tds_`, an API key's `tdk_live_` or `tdk_test_`. */
   api_key?: ApiKey | null;
   scopes: Scope[];
   /** False for test-mode keys. */
   livemode?: boolean;
+}
+
+/** Whether `me` describes a session token (a signed-in user) rather than an API key. */
+export function isSession(me: Pick<Me, 'api_key' | 'organizations'>): boolean {
+  if (me.api_key?.prefix) return me.api_key.prefix.startsWith('tds_');
+  // Older servers: a session lists its memberships (never empty); an API key lists none.
+  return me.organizations.length > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -1247,7 +1301,7 @@ export interface ConnectionConfig {
   message_group_id?: string | null;
 }
 
-/** Write-only credentials. On update, an omitted secret is kept and `""` clears it. */
+/** Write-only credentials. On update, an omitted secret is kept and `""` (or `null`, storage) clears it. */
 export interface ConnectionSecrets {
   access_key_id?: string;
   secret_access_key?: string;
@@ -1269,6 +1323,8 @@ export interface Connection {
   config: ConnectionConfig;
   /** Names of the secrets that are stored (their values are never returned). */
   secrets_set: (keyof ConnectionSecrets)[];
+  /** The secrets that are set, with their fingerprints. */
+  secrets?: Partial<Record<keyof ConnectionSecrets, SecretFingerprint>>;
   /** Messaging connections are `false` on all three. */
   capabilities: { source: boolean; destination: boolean; watch: boolean };
   status: ConnectionStatus;
@@ -1301,10 +1357,13 @@ export interface ConnectionUpdateParams {
   name?: string;
   /** `true` turns it back on (the failure count resets and it is tested again); `false` turns it off. */
   enabled?: boolean;
-  /** Merged into the stored config. */
+  /** Merged into the stored config: a field left out is kept, `null` clears it. */
   config?: ConnectionConfig;
-  secrets?: ConnectionSecrets;
+  /** A secret left out is kept; `""` or `null` (storage) clears it. */
+  secrets?: ConnectionSecretsUpdate;
 }
+
+export type ConnectionSecretsUpdate = { [K in keyof ConnectionSecrets]?: string | null };
 
 export interface ConnectionTestResult {
   object: 'connection_test';
@@ -1492,8 +1551,14 @@ export interface AutomationCreateParams {
   webhook_url?: string;
 }
 
-export type AutomationUpdateParams = Partial<Omit<AutomationCreateParams, 'source'>> & {
+/**
+ * Fields left out are kept. `null` clears `destination`, `preset`, `output`, `metadata`, `webhook_url` and
+ * `trigger_connection_id`.
+ */
+export type AutomationUpdateParams = Partial<Omit<AutomationCreateParams, 'source' | 'metadata' | 'webhook_url'>> & {
   source?: Partial<AutomationCreateParams['source']>;
+  metadata?: Metadata | null;
+  webhook_url?: string | null;
 };
 
 export interface AutomationRun {

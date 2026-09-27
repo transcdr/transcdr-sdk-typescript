@@ -75,7 +75,7 @@ describe('members', () => {
 
   it('leaves by deleting its own membership', async () => {
     const { fetch, calls } = mockFetch(
-      json({ user, organization: {}, organizations: [], scopes: ['*'] }),
+      json({ user, organization: {}, organizations: [membership('org_2')], api_key: { prefix: 'tds_abcd' }, scopes: ['*'] }),
       new Response(null, { status: 204 }),
     );
     await client(fetch).organization.members.leave();
@@ -84,8 +84,10 @@ describe('members', () => {
     expect(calls[1].url).toBe('http://api.test/v1/organization/members/usr_1');
   });
 
-  it('refuses to leave with an API key', async () => {
-    const { fetch, calls } = mockFetch(json({ user: null, organization: {}, organizations: [], scopes: ['*'] }));
+  it('refuses to leave with an API key, whose user is the key creator', async () => {
+    const { fetch, calls } = mockFetch(
+      json({ user, organization: {}, organizations: [], api_key: { prefix: 'tdk_live_ab12' }, scopes: ['*'] }),
+    );
     await expect(client(fetch).organization.members.leave()).rejects.toThrow(/session token/);
     expect(calls).toHaveLength(1);
   });

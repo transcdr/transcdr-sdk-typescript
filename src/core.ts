@@ -3,7 +3,7 @@ import { PagePromise, asList } from './pagination';
 import type { ListResponse } from './types';
 
 export const DEFAULT_BASE_URL = 'https://api.transcdr.com';
-export const SDK_VERSION = '0.3.0';
+export const SDK_VERSION = '0.4.0';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -30,7 +30,10 @@ export interface RequestOptions {
   query?: Record<string, QueryValue>;
   body?: unknown;
   headers?: Record<string, string>;
-  /** Makes a POST safely retryable. */
+  /**
+   * Makes a POST safely retryable. Creates send a random one unless you pass your own: reuse a key to make
+   * a create you repeat (after a crash, say) return the first result instead of a duplicate, for 24 hours.
+   */
   idempotencyKey?: string;
   signal?: AbortSignal;
   /** Override the client's retry count for this call. */
@@ -168,6 +171,14 @@ export class Core {
       }
       throw errorFromResponse(response.status, await parseBody(response).catch(() => null), response.headers);
     }
+  }
+
+  /**
+   * A create (`POST`): sends an `Idempotency-Key` (the caller's, or a random one) so the request is retried
+   * safely. A retry the API has already applied replays the first response rather than creating a duplicate.
+   */
+  create<T>(path: string, body: unknown, options: RequestOptions = {}): Promise<T> {
+    return this.request<T>('POST', path, { ...options, body, idempotencyKey: options.idempotencyKey ?? idempotencyKey() });
   }
 
   /** A list endpoint as a `PagePromise` that can also auto-paginate. */

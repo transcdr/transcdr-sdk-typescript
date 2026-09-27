@@ -31,7 +31,10 @@ export class Auth extends Resource {
     await this.core.request('POST', '/v1/auth/password', { ...options, body: params });
   }
 
-  /** The caller: user (null for API keys), organization, the user's organizations and scopes. */
+  /**
+   * The caller: the user (for an API key, the user who created it), the organization, the user's
+   * organizations (sessions only) and scopes. `isSession(me)` tells a session from an API key.
+   */
   me(options?: RequestOptions): Promise<Me> {
     return this.core.request('GET', '/v1/me', options);
   }

@@ -20,6 +20,7 @@ import type {
   Portal,
   Preset,
   PresetCreateParams,
+  PresetReplaceParams,
   PresetUpdateParams,
   ProbeParams,
   Statement,
@@ -34,9 +35,8 @@ export class Probe extends Resource {
   /** Probe an input without transcoding. `wait: true` blocks up to 60 s for the result. */
   create(params: ProbeParams & { wait?: boolean }, options?: RequestOptions): Promise<Job> {
     const { wait, ...body } = params;
-    return this.core.request('POST', '/v1/probe', {
+    return this.core.create('/v1/probe', body, {
       ...options,
-      body,
       query: { ...options?.query, wait: wait ? 'true' : undefined },
       timeoutMs: options?.timeoutMs ?? (wait ? 90_000 : undefined),
     });
@@ -54,7 +54,7 @@ export class Presets extends Resource {
   }
 
   create(params: PresetCreateParams, options?: RequestOptions): Promise<Preset> {
-    return this.core.request('POST', '/v1/presets', { ...options, body: params });
+    return this.core.create('/v1/presets', params, options);
   }
 
   /** By `pre_…` id or by slug (system or custom). */
@@ -62,8 +62,20 @@ export class Presets extends Resource {
     return this.core.request('GET', `/v1/presets/${seg(idOrSlug)}`, options);
   }
 
+  /**
+   * Change the fields sent (`PATCH`). `output` merges into the stored spec; `null` clears
+   * `description` or `metadata`.
+   */
   update(id: string, params: PresetUpdateParams, options?: RequestOptions): Promise<Preset> {
     return this.core.request('PATCH', `/v1/presets/${seg(id)}`, { ...options, body: params });
+  }
+
+  /**
+   * Replace the preset (`PUT`): `output` is the whole spec (a field left out takes its default, as on
+   * create), `description` and `metadata` left out are emptied, and `slug` left out is kept.
+   */
+  replace(id: string, params: PresetReplaceParams, options?: RequestOptions): Promise<Preset> {
+    return this.core.request('PUT', `/v1/presets/${seg(id)}`, { ...options, body: params });
   }
 
   async del(id: string, options?: RequestOptions): Promise<void> {

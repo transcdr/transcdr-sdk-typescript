@@ -35,7 +35,7 @@ export class Connections extends Resource {
 
   /** The connection is tested before it is saved; a failing one is refused with a 422. */
   create(params: ConnectionCreateParams, options?: RequestOptions): Promise<Connection> {
-    return this.core.request('POST', '/v1/connections', { ...options, body: params });
+    return this.core.create('/v1/connections', params, options);
   }
 
   retrieve(id: string, options?: RequestOptions): Promise<Connection> {
@@ -103,7 +103,7 @@ export class Automations extends Resource {
   }
 
   create(params: AutomationCreateParams, options?: RequestOptions): Promise<Automation> {
-    return this.core.request('POST', '/v1/automations', { ...options, body: params });
+    return this.core.create('/v1/automations', params, options);
   }
 
   retrieve(id: string, options?: RequestOptions): Promise<Automation> {

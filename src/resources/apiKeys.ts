@@ -13,9 +13,14 @@ export class ApiKeys extends Resource {
     return this.list(params).toArray(max);
   }
 
+  /** One key, as the list shows it (no `secret`). 404 once it is revoked. */
+  retrieve(id: string, options?: RequestOptions): Promise<ApiKey> {
+    return this.core.request('GET', `/v1/api-keys/${seg(id)}`, options);
+  }
+
   /** The returned key carries `secret`, the only time it is ever shown. */
   create(params: ApiKeyCreateParams, options?: RequestOptions): Promise<ApiKey> {
-    return this.core.request('POST', '/v1/api-keys', { ...options, body: params });
+    return this.core.create('/v1/api-keys', params, options);
   }
 
   /** Revoke a key immediately. */

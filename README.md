@@ -11,9 +11,13 @@ with MP4 and CMAF/HLS output, behind one small REST API.
 
 ## Install
 
+The package is installed from GitHub (it is not on the npm registry); it builds on install:
+
 ```sh
-npm install @transcdr/sdk
+npm install github:transcdr/transcdr-sdk-typescript#v0.4.0
 ```
+
+It is imported as `@transcdr/sdk`.
 
 ## Quickstart
 
@@ -119,12 +123,12 @@ Every method also takes a trailing `RequestOptions` (`signal`, `timeoutMs`, `max
 | `auth` | `register`, `login`, `switch`, `logout`, `me`, `changePassword` |
 | `organization` | `retrieve`, `update`, `members.list`, `members.create`, `members.update`, `members.del`, `members.leave`, `rotateJobWebhookSecret` |
 | `organizations` | session tokens only: `list` (the user's memberships), `create` |
-| `apiKeys` | `list`, `listAll`, `create`, `revoke` (`del`) |
+| `apiKeys` | `list`, `listAll`, `retrieve` (404 once revoked), `create`, `revoke` (`del`) |
 | `uploads` | `create`, `complete`, `uploadFile` |
 | `assets` | `list`, `listAll`, `create` (link by URL), `retrieve`, `contentUrl`, `del` |
 | `jobs` | `create`, `list`, `listAll`, `retrieve`, `cancel`, `retry`, `del`, `events`, `outputs`, `outputUrl`, `fileUrl`, `waitFor`, `deliveries`, `deliver` |
 | `probe` | `create({ input, wait })` |
-| `presets` | `list`, `listAll`, `create`, `retrieve` (id or slug), `update`, `del` |
+| `presets` | `list`, `listAll`, `create`, `retrieve` (id or slug), `update` (PATCH: `output` merges), `replace` (PUT: the whole preset), `del` |
 | `webhooks` | `list`, `listAll`, `create` (HTTPS, SNS, SQS or through a connection), `retrieve`, `update`, `del`, `rotateSecret`, `test`, `check`, `checkSaved`, `deliveries`, `redeliver`, `verifySignature`, `verifySnsSqsSignature`, `constructEvent` |
 | `events` | `list`, `retrieve` |
 | `usage` | `retrieve({ from, to, granularity })`, `inputs({ from, to })` (inputs by duration, size and kind) |
@@ -252,12 +256,36 @@ for (const entry of (await transcdr.billing.transactions({ limit: 20 })).data) {
 
 Requests are retried up to `maxRetries` times with exponential backoff and jitter (honouring `Retry-After`) on 429,
 5xx and network errors, but only when that is safe: `GET`, `PUT` and `DELETE`, and `POST`s that carry an
-`Idempotency-Key`. `jobs.create` and `uploads.create` generate a key automatically when retries are enabled, so a
-retried create never makes a duplicate. Pass your own to make restarts safe too:
+`Idempotency-Key`. Every create (`jobs`, `probe`, `uploads`, `assets`, `presets`, `webhooks`, `connections`,
+`automations`, `apiKeys`, `organization.members`, `organizations`) sends a random key, so a retried create never makes
+a duplicate: the API replays the first response (with `Idempotent-Replayed: true`). Keys last 24 hours per
+organization. Pass your own to make restarts safe too:
 
 ```ts
 await transcdr.jobs.create(params, { idempotencyKey: `video-${video.id}` });
 ```
+
+The same key with a different body is refused with 409 `idempotency_key_reused`. Only a successful create is
+remembered, so after an error the key can be used again.
+
+## Updating: left out, or null
+
+`update` methods send `PATCH`: a field left out keeps its value, and an explicit `null` clears it. That covers an
+automation's `destination`, `preset`, `output`, `metadata`, `webhook_url` and `trigger_connection_id`; a webhook's
+`description`, `aws.endpoint` and `aws.message_group_id`; a connection's `config` fields and storage `secrets`; a
+preset's `description` and `metadata`; and the organization's `billing_email`.
+
+```ts
+await transcdr.automations.update('aut_…', { destination: null, webhook_url: null });
+await transcdr.presets.replace('pre_…', { name: 'Web 1080p', output: { codec: 'av1' } }); // PUT: the whole preset
+```
+
+Connections and webhooks never return their secrets. `secrets` lists the ones that are set, each with a
+`fingerprint` (`hmac-sha256:<12 hex>`) that changes when the secret does: compare it with an earlier read to notice a
+change made elsewhere.
+
+`auth.me()` returns a `user` for API keys too (the user who created the key); use `isSession(me)` to tell a session
+(`api_key.prefix` starts `tds_`) from an API key.
 
 ## Webhooks
 
