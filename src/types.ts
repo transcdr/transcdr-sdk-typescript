@@ -708,11 +708,28 @@ export interface User {
   created_at: Timestamp;
 }
 
+/**
+ * Add a member. The email of an existing Transcdr user gives that user access
+ * (`name` and `password` are refused); an unknown email creates the user, and
+ * then `name` and `password` are required.
+ */
 export interface MemberCreateParams {
-  name: string;
   email: string;
   role: Role;
-  password: string;
+  name?: string;
+  password?: string;
+}
+
+/** An organization the user belongs to, with the user's role there. */
+export interface Membership {
+  object: 'membership';
+  organization: { id: string; name: string; slug: string; plan: PlanId };
+  role: Role;
+  created_at: Timestamp;
+}
+
+export interface OrganizationCreateParams {
+  name: string;
 }
 
 export interface RegisterParams {
@@ -725,6 +742,8 @@ export interface RegisterParams {
 export interface LoginParams {
   email: string;
   password: string;
+  /** The organization to sign in to; by default the one used last. */
+  organization_id?: string;
 }
 
 export interface ChangePasswordParams {
@@ -734,14 +753,20 @@ export interface ChangePasswordParams {
 
 export interface AuthResponse {
   token: string;
+  /** `role` and `organization_id` are the user's in `organization`. */
   user: User;
+  /** The organization the token belongs to. */
   organization: Organization;
+  /** Every organization the user belongs to. */
+  organizations: Membership[];
 }
 
 export interface Me {
   /** Null when authenticated with an API key. */
   user: User | null;
   organization: Organization;
+  /** Every organization the user belongs to; empty for API keys. */
+  organizations: Membership[];
   /** The key in use, when authenticated with an API key. */
   api_key?: ApiKey | null;
   scopes: Scope[];

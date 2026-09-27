@@ -116,8 +116,9 @@ Every method also takes a trailing `RequestOptions` (`signal`, `timeoutMs`, `max
 
 | Namespace | Methods |
 |---|---|
-| `auth` | `register`, `login`, `logout`, `me`, `changePassword` |
-| `organization` | `retrieve`, `update`, `members.list`, `members.create`, `members.update`, `members.del`, `rotateJobWebhookSecret` |
+| `auth` | `register`, `login`, `switch`, `logout`, `me`, `changePassword` |
+| `organization` | `retrieve`, `update`, `members.list`, `members.create`, `members.update`, `members.del`, `members.leave`, `rotateJobWebhookSecret` |
+| `organizations` | session tokens only: `list` (the user's memberships), `create` |
 | `apiKeys` | `list`, `listAll`, `create`, `revoke` (`del`) |
 | `uploads` | `create`, `complete`, `uploadFile` |
 | `assets` | `list`, `listAll`, `create` (link by URL), `retrieve`, `contentUrl`, `del` |
@@ -140,6 +141,36 @@ Every method also takes a trailing `RequestOptions` (`signal`, `timeoutMs`, `max
 | `admin` | platform operators only: `overview`, `jobs`, `organizations`, `updateOrganization`, `announcements.list`, `announcements.create`, `announcements.update`, `announcements.del` |
 
 For anything newer than the SDK, `transcdr.request(method, path, options)` calls an endpoint directly.
+
+## Organizations
+
+One login can belong to several organizations, with a role in each. A session token belongs to one of them:
+login lands in the one used last, or pass `organization_id`. Every auth response lists the user's memberships.
+
+```ts
+const session = await transcdr.auth.login({ email, password });
+transcdr.setApiKey(session.token);
+for (const m of session.organizations) console.log(m.organization.id, m.organization.name, m.role);
+
+// Switch: the old token is revoked, so keep the new one.
+const other = await transcdr.auth.switch('org_…');
+transcdr.setApiKey(other.token);
+
+// Create an organization you own, with a session in it (the current token keeps working).
+const created = await transcdr.organizations.create({ name: 'Studio' });
+transcdr.setApiKey(created.token);
+```
+
+Members: adding the email of an existing Transcdr user gives them access (no `name` or `password`); an unknown email
+creates the user and needs both. An organization may have several owners, and only owners add, promote or remove
+owners (403 `role_required`). The last owner cannot be demoted or removed (409 `last_owner`).
+`organization.members.leave()` removes your own membership. `auth.switch` and `organizations` need a session: an API
+key gets 403 `session_required`; an organization you do not belong to gets 403 `not_a_member`.
+
+```ts
+await transcdr.organization.members.create({ email: 'ada@example.com', role: 'admin' });
+await transcdr.organization.members.create({ email: 'new@example.com', role: 'member', name: 'New', password: '…' });
+```
 
 ## Pagination
 
@@ -414,7 +445,7 @@ if (!report.roles.destination) console.log(JSON.stringify(report.setup?.iam_poli
 ## Types
 
 Every API object is exported as a type: `Job`, `OutputSpec`, `OutputSpecInput`, `Rendition`, `Asset`, `Upload`,
-`Preset`, `WebhookEndpoint`, `WebhookDelivery`, `ConnectionCheck`, `WebhookCheck`, `Event`, `ApiKey`, `Organization`, `User`, `Usage`, `Plan`, `Billing`,
+`Preset`, `WebhookEndpoint`, `WebhookDelivery`, `ConnectionCheck`, `WebhookCheck`, `Event`, `ApiKey`, `Organization`, `User`, `Membership`, `Usage`, `Plan`, `Billing`,
 `CreditAccount`, `CreditTransaction`, `Statement`, `Announcement`, `ServiceCredit`, `MediaInfo`, `ListResponse<T>` and more, plus constants such as `JOB_STATUSES`, `EVENT_TYPES` and `SCOPES`.
 
 ## License

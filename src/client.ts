@@ -17,7 +17,7 @@ import {
   StatusResource,
   UsageResource,
 } from './resources/misc';
-import { OrganizationResource } from './resources/organization';
+import { OrganizationResource, Organizations } from './resources/organization';
 import { Uploads } from './resources/uploads';
 import { Webhooks } from './resources/webhooks';
 
@@ -34,6 +34,8 @@ export class Transcdr {
 
   readonly auth: Auth;
   readonly organization: OrganizationResource;
+  /** The user's organizations (session tokens only). */
+  readonly organizations: Organizations;
   readonly apiKeys: ApiKeys;
   readonly uploads: Uploads;
   readonly assets: Assets;
@@ -61,6 +63,7 @@ export class Transcdr {
     this.core = new Core(options);
     this.auth = new Auth(this.core);
     this.organization = new OrganizationResource(this.core);
+    this.organizations = new Organizations(this.core);
     this.apiKeys = new ApiKeys(this.core);
     this.uploads = new Uploads(this.core);
     this.assets = new Assets(this.core);

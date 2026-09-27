@@ -13,6 +13,14 @@ export class Auth extends Resource {
     return this.core.request('POST', '/v1/auth/login', { ...options, body: params });
   }
 
+  /**
+   * Issue a session token for another of the user's organizations (sessions only).
+   * The current token is revoked, so store the new one, e.g. with `setApiKey`.
+   */
+  switch(organizationId: string, options?: RequestOptions): Promise<AuthResponse> {
+    return this.core.request('POST', '/v1/auth/switch', { ...options, body: { organization_id: organizationId } });
+  }
+
   /** Revoke the session token the client is using. */
   async logout(options?: RequestOptions): Promise<void> {
     await this.core.request('POST', '/v1/auth/logout', options);
@@ -23,7 +31,7 @@ export class Auth extends Resource {
     await this.core.request('POST', '/v1/auth/password', { ...options, body: params });
   }
 
-  /** The caller: user (null for API keys), organization and scopes. */
+  /** The caller: user (null for API keys), organization, the user's organizations and scopes. */
   me(options?: RequestOptions): Promise<Me> {
     return this.core.request('GET', '/v1/me', options);
   }
