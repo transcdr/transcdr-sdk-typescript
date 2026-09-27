@@ -66,6 +66,33 @@ Already hosting the source? Skip the upload:
 await transcdr.jobs.create({ input: { type: 'url', url: 'https://example.com/in.mp4' }, preset: 'web-av1-1080p' });
 ```
 
+### Constant bit rate
+
+By default each rendition is coded to a quality level (`quality.target`, or a `crf`), so its bitrate follows the
+content. When a player, network or broadcast chain needs predictable bandwidth, set `quality.target: 'cbr'` and
+every rendition is coded at a constant bit rate: its own `bitrate`, else `quality.bitrate`, else a default for
+its resolution and codec (H.264 about 5 Mb/s at 1080p30, 3 at 720p, 1.2 at 480p and 0.8 at 360p; H.265 about
+0.65× that and AV1 about 0.5×; more above 30 fps). `quality.buffer_ms` (100–10000, default 1000) sets the rate
+buffer. Rates are 100k to 200M.
+
+```ts
+await transcdr.jobs.create({
+  input,
+  output: {
+    mode: 'hls',
+    codec: 'h264',
+    renditions: [
+      { width: 1920, height: 1080, bitrate: '5M' },
+      { width: 1280, height: 720 }, // takes quality.bitrate
+    ],
+    quality: { target: 'cbr', bitrate: '3M', buffer_ms: 1000 },
+  },
+});
+```
+
+`crf` with `'cbr'` is refused, and so is a rendition `bitrate`, `quality.bitrate` or `buffer_ms` without it. The
+`hls-h264-cbr` system preset is H.264 HLS at 5M, 3M, 1200k and 800k for 1080p, 720p, 480p and 360p.
+
 ## Configuration
 
 ```ts
