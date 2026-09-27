@@ -654,7 +654,11 @@ export interface ApiKeyCreateParams {
   expires_at?: Timestamp | null;
 }
 
-export type PlanId = 'free' | 'pay_as_you_go' | 'starter' | 'growth' | 'scale' | 'enterprise';
+/**
+ * `unlimited` is never listed by `plans.list()` and cannot be bought: the
+ * Transcdr team assigns it. Jobs on it are never refused for credit and cost $0.
+ */
+export type PlanId = 'free' | 'pay_as_you_go' | 'starter' | 'growth' | 'scale' | 'enterprise' | 'unlimited';
 /** Plans bought as a monthly subscription through checkout. */
 export type SubscriptionPlanId = 'starter' | 'growth' | 'scale';
 export type Role = 'owner' | 'admin' | 'member';
