@@ -37,11 +37,29 @@ export interface ListParams {
 // Output specification
 // ---------------------------------------------------------------------------
 
-/** `single` (one MP4), `hls` (an adaptive ladder) or `audio` (the audio alone, one `.mp3`). */
+/**
+ * `single` (one MP4), `hls` (an adaptive ladder) or `audio` (the audio alone as one file: an `.mp3`, `.flac` or
+ * `.m4a`, see `Audio.container`).
+ */
 export type Mode = 'single' | 'hls' | 'audio';
 export type Codec = 'av1' | 'h264' | 'h265';
-/** `mp3` is constant bit rate, stereo at most, in a single MP4 or audio-only output (not HLS). */
-export type AudioMode = 'auto' | 'opus' | 'mp3' | 'drop';
+/**
+ * `auto` passes compatible audio through and transcodes the rest (to Opus, or to MP3 in an audio-only `.mp3`).
+ * `aac` is AAC-LC, the choice that plays on the most devices (an AAC source passes through). `mp3` is constant bit
+ * rate, stereo at most, in a single MP4 or audio-only output (not HLS). `flac` and `alac` are lossless (a source
+ * already in that codec is copied) and take no bitrate.
+ */
+export type AudioMode = 'auto' | 'opus' | 'mp3' | 'aac' | 'flac' | 'alac' | 'drop';
+/** FLAC and ALAC sample depth. `source` (the default) is 16-bit for a 16-bit or lossy source, 24-bit for a deeper one. */
+export type AudioBitDepth = 'source' | '16' | '24';
+/** FLAC compression effort: the same audio either way, a smaller file for more work. Default `default`. */
+export type FlacCompression = 'fast' | 'default' | 'best';
+/**
+ * The file audio-only output is. `auto` (the default) follows the codec: `.flac` for FLAC, `.m4a` for ALAC, `.mp3`
+ * otherwise (`auto` audio is then MP3). `m4a` holds any codec (`auto` audio in an `.m4a` is Opus); `.flac` holds FLAC
+ * only and `.mp3` holds MP3 only.
+ */
+export type AudioContainer = 'auto' | 'mp3' | 'flac' | 'm4a';
 /**
  * Audio channel layout. `source` keeps the source's; the rest downmix and never upmix (asking for more
  * channels than the source has fails the job). MP3 carries `source`, `mono` or `stereo` only.
@@ -91,13 +109,20 @@ export interface Audio {
   mode?: AudioMode;
   /**
    * Bitrate such as `"128k"` (6k–512k). MP3 takes 32k, 40k, 48k, 56k, 64k, 80k, 96k, 112k, 128k, 160k,
-   * 192k, 224k, 256k or 320k (default 128k stereo, 64k mono).
+   * 192k, 224k, 256k or 320k (default 128k stereo, 64k mono). AAC takes 8k to 288k per main channel (the LFE
+   * does not count; default 64k mono, 128k stereo, 384k 5.1, 512k 7.1). Not with `flac` or `alac`.
    */
   bitrate?: string | null;
   /** Channel layout; left out, the source's (`source`). */
   channels?: AudioChannels;
   /** HLS with surround audio: also add a stereo rendition to the same audio group. Default false. */
   stereo_fallback?: boolean;
+  /** `flac` and `alac` only: the output's sample depth. */
+  bit_depth?: AudioBitDepth;
+  /** `flac` only: the compression effort. */
+  flac_compression?: FlacCompression;
+  /** Mode `audio` only: the file the output is. Left out, `auto`. */
+  container?: AudioContainer;
 }
 
 export interface Trim {

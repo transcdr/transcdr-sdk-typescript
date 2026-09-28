@@ -82,6 +82,31 @@ describe('requests', () => {
     expect(AUDIO_CHANNELS).toEqual(['source', 'mono', 'stereo', '5.1', '7.1']);
   });
 
+  it('sends AAC, FLAC and ALAC audio with their settings as written', async () => {
+    const outputs: OutputSpecInput[] = [
+      { mode: 'audio', audio: { mode: 'aac', bitrate: '96k', channels: 'stereo', container: 'm4a' } },
+      { mode: 'audio', audio: { mode: 'flac', bit_depth: '24', flac_compression: 'best', container: 'flac' } },
+      { mode: 'audio', audio: { mode: 'alac', bit_depth: '16', container: 'auto' } },
+      { mode: 'single', audio: { mode: 'flac', bit_depth: 'source', flac_compression: 'fast' } },
+      { mode: 'hls', audio: { mode: 'aac', channels: '5.1', stereo_fallback: true } },
+      { mode: 'audio', audio: { mode: 'mp3', container: 'mp3' } },
+    ];
+    for (const output of outputs) {
+      const { fetch, calls } = mockFetch(json(job('job_1')));
+      await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, output });
+      expect((calls[0].body as { output: unknown }).output).toEqual(output);
+    }
+  });
+
+  it('reads bit_depth, flac_compression and container back from a job', async () => {
+    const audio: Audio = { mode: 'flac', bit_depth: '24', flac_compression: 'default', container: 'm4a' };
+    const { fetch } = mockFetch(json({ ...job('job_1'), output: { mode: 'audio', audio } }));
+    const got = await client(fetch).jobs.retrieve('job_1');
+    expect(got.output.audio).toEqual(audio);
+    expect(got.output.audio?.bit_depth).toBe('24');
+    expect(got.output.audio?.container).toBe('m4a');
+  });
+
   it('generates an Idempotency-Key for jobs.create and uploads.create', async () => {
     const { fetch, calls } = mockFetch(json(job('job_1')), json({ object: 'upload', id: 'upl_1' }));
     const transcdr = client(fetch);

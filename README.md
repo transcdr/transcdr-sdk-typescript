@@ -97,12 +97,27 @@ await transcdr.jobs.create({
 `crf` with `'cbr'` is refused, and so is a rendition `bitrate`, `quality.bitrate` or `buffer_ms` without it. The
 `hls-h264-cbr` system preset is H.264 HLS at 5M, 3M, 1200k and 800k for 1080p, 720p, 480p and 360p.
 
-### Audio: MP3, audio-only, channels
+### Audio: AAC, lossless, MP3, audio-only, channels
 
-`mode: 'audio'` writes the audio alone as one `.mp3` file (label `audio`, width and height 0), billed per output
-minute at the SD rate. A `single` job whose input has no video becomes audio-only by itself. `audio.mode: 'mp3'`
-puts constant bit rate MP3 in a single MP4 or an audio-only output (not HLS), stereo at most; its `bitrate` is one of
-32k, 40k, 48k, 56k, 64k, 80k, 96k, 112k, 128k, 160k, 192k, 224k, 256k or 320k (default 128k stereo, 64k mono).
+`audio.mode` is `'auto'` (the default: compatible audio passes through, the rest becomes Opus), `'opus'`, `'aac'`,
+`'mp3'`, `'flac'`, `'alac'` or `'drop'`.
+
+- `'aac'` is AAC-LC, the audio that plays on the most devices: every browser, iPhone, Android phone and TV. An AAC
+  source passes through. It works in a single MP4, HLS and audio-only `.m4a` output. `bitrate` is 8k to 288k per main
+  channel (the LFE of 5.1 and 7.1 does not count); the default is 64k mono, 128k stereo, 384k 5.1 and 512k 7.1.
+- `'flac'` and `'alac'` are lossless: a source already in that codec is copied, and they take no `bitrate`. Both work
+  in a single MP4, HLS and audio-only output. `audio.bit_depth` is `'source'` (the default: 16-bit for a 16-bit or
+  lossy source, 24-bit for a deeper one), `'16'` or `'24'`. For FLAC, `audio.flac_compression` is `'fast'`,
+  `'default'` or `'best'`: the same audio either way, a smaller file for more work.
+- `'mp3'` is constant bit rate, stereo at most, in a single MP4 or audio-only output (not HLS); its `bitrate` is one
+  of 32k, 40k, 48k, 56k, 64k, 80k, 96k, 112k, 128k, 160k, 192k, 224k, 256k or 320k (default 128k stereo, 64k mono).
+
+`mode: 'audio'` writes the audio alone as one file (label `audio`, width and height 0), billed per output minute at
+the SD rate. `audio.container` picks the file: `'auto'` (the default) follows the codec, a `.flac` for FLAC, an
+`.m4a` for ALAC and an `.mp3` otherwise (`'auto'` audio is then MP3); `'m4a'` holds any codec (`'auto'` audio in an
+`.m4a` is Opus); `'flac'` holds FLAC only and `'mp3'` MP3 only. The file is `audio.mp3` (`audio/mpeg`), `audio.flac`
+(`audio/flac`) or `audio.m4a` (`audio/mp4`). `container` applies only to mode `'audio'`. A `single` job whose input
+has no video becomes audio-only by itself; with AAC or Opus audio it is an `.m4a`.
 
 `audio.channels` is `'source'` (the default), `'mono'`, `'stereo'`, `'5.1'` or `'7.1'` (`AUDIO_CHANNELS`); it
 downmixes and never upmixes. In HLS with surround audio, `audio.stereo_fallback: true` adds a stereo rendition to the
@@ -112,11 +127,21 @@ same audio group for players that cannot play surround.
 // A podcast episode from a video recording.
 await transcdr.jobs.create({ input, output: { mode: 'audio', audio: { mode: 'mp3', bitrate: '128k', channels: 'stereo' } } });
 
-// Surround HLS with a stereo rendition beside it.
-await transcdr.jobs.create({ input, output: { mode: 'hls', codec: 'h264', audio: { channels: '5.1', stereo_fallback: true } } });
+// AAC in an .m4a for phones and browsers.
+await transcdr.jobs.create({ input, output: { mode: 'audio', audio: { mode: 'aac', container: 'm4a' } } });
+
+// A lossless 24-bit FLAC master.
+await transcdr.jobs.create({ input, output: { mode: 'audio', audio: { mode: 'flac', bit_depth: '24', flac_compression: 'best' } } });
+
+// Surround AAC in HLS with a stereo rendition beside it.
+await transcdr.jobs.create({ input, output: { mode: 'hls', codec: 'h264', audio: { mode: 'aac', channels: '5.1', stereo_fallback: true } } });
 ```
 
-The `audio-mp3-podcast` and `audio-mp3-speech` system presets (category `audio`) are MP3 at 128k stereo and 64k mono.
+Audio system presets (category `audio`): `audio-mp3-podcast` and `audio-mp3-speech` (MP3 at 128k stereo and 64k
+mono), `audio-aac-m4a` (AAC in an `.m4a`) and `audio-alac-m4a` (Apple Lossless in an `.m4a`). In category `archive`,
+`audio-flac` is a native `.flac` at best compression and `archive-av1-flac` is visually lossless AV1 with FLAC audio
+in one MP4. The reach presets (`mp4-h264-compat-1080p`, `mp4-h265-1080p`, `hls-h264-abr`, `hls-h264-cbr`,
+`social-vertical-1080x1920`, `hls-h264-surround` and `mp4-h264-surround-1080p`, now in category `tv`) use AAC audio.
 
 ## Configuration
 

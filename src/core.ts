@@ -3,7 +3,7 @@ import { PagePromise, asList } from './pagination';
 import type { ListResponse } from './types';
 
 export const DEFAULT_BASE_URL = 'https://api.transcdr.com';
-export const SDK_VERSION = '0.6.0';
+export const SDK_VERSION = '0.7.0';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
