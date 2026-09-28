@@ -11,6 +11,9 @@ import {
   TranscdrError,
   WaitTimeoutError,
   buildQuery,
+  AUDIO_CHANNELS,
+  type Audio,
+  type OutputSpecInput,
 } from '../src';
 import { json, mockFetch } from './helpers';
 
@@ -51,6 +54,32 @@ describe('requests', () => {
     };
     await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, output });
     expect(calls[0].body).toEqual({ input: { type: 'asset', asset_id: 'ast_1' }, output });
+  });
+
+  it('sends an audio-only MP3 output as written', async () => {
+    const { fetch, calls } = mockFetch(json(job('job_1')));
+    const output: OutputSpecInput = { mode: 'audio', audio: { mode: 'mp3', bitrate: '64k', channels: 'mono' } };
+    await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, output });
+    expect(calls[0].body).toEqual({
+      input: { type: 'asset', asset_id: 'ast_1' },
+      output: { mode: 'audio', audio: { mode: 'mp3', bitrate: '64k', channels: 'mono' } },
+    });
+  });
+
+  it('sends surround channels and a stereo fallback as written', async () => {
+    const { fetch, calls } = mockFetch(json(job('job_1')));
+    const output: OutputSpecInput = { mode: 'hls', audio: { mode: 'opus', channels: '5.1', stereo_fallback: true } };
+    await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, output });
+    expect((calls[0].body as { output: unknown }).output).toEqual({ mode: 'hls', audio: { mode: 'opus', channels: '5.1', stereo_fallback: true } });
+  });
+
+  it('reads the audio fields back from a job', async () => {
+    const audio: Audio = { mode: 'mp3', bitrate: '128k', channels: 'stereo', stereo_fallback: false };
+    const { fetch } = mockFetch(json({ ...job('job_1'), output: { mode: 'audio', audio } }));
+    const got = await client(fetch).jobs.retrieve('job_1');
+    expect(got.output.mode).toBe('audio');
+    expect(got.output.audio).toEqual(audio);
+    expect(AUDIO_CHANNELS).toEqual(['source', 'mono', 'stereo', '5.1', '7.1']);
   });
 
   it('generates an Idempotency-Key for jobs.create and uploads.create', async () => {

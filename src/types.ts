@@ -37,9 +37,18 @@ export interface ListParams {
 // Output specification
 // ---------------------------------------------------------------------------
 
-export type Mode = 'single' | 'hls';
+/** `single` (one MP4), `hls` (an adaptive ladder) or `audio` (the audio alone, one `.mp3`). */
+export type Mode = 'single' | 'hls' | 'audio';
 export type Codec = 'av1' | 'h264' | 'h265';
-export type AudioMode = 'auto' | 'opus' | 'drop';
+/** `mp3` is constant bit rate, stereo at most, in a single MP4 or audio-only output (not HLS). */
+export type AudioMode = 'auto' | 'opus' | 'mp3' | 'drop';
+/**
+ * Audio channel layout. `source` keeps the source's; the rest downmix and never upmix (asking for more
+ * channels than the source has fails the job). MP3 carries `source`, `mono` or `stereo` only.
+ */
+export type AudioChannels = 'source' | 'mono' | 'stereo' | '5.1' | '7.1';
+/** Every audio channel layout, in display order. */
+export const AUDIO_CHANNELS = ['source', 'mono', 'stereo', '5.1', '7.1'] as const;
 export type Color = 'sdr' | 'hdr10' | 'hlg' | 'passthrough';
 export type BitDepth = 'auto' | '8bit' | '10bit';
 /**
@@ -80,8 +89,15 @@ export interface Quality {
 
 export interface Audio {
   mode?: AudioMode;
-  /** Opus bitrate such as `"128k"` (6k–512k). */
+  /**
+   * Bitrate such as `"128k"` (6k–512k). MP3 takes 32k, 40k, 48k, 56k, 64k, 80k, 96k, 112k, 128k, 160k,
+   * 192k, 224k, 256k or 320k (default 128k stereo, 64k mono).
+   */
   bitrate?: string | null;
+  /** Channel layout; left out, the source's (`source`). */
+  channels?: AudioChannels;
+  /** HLS with surround audio: also add a stereo rendition to the same audio group. Default false. */
+  stereo_fallback?: boolean;
 }
 
 export interface Trim {

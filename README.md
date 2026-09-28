@@ -97,6 +97,27 @@ await transcdr.jobs.create({
 `crf` with `'cbr'` is refused, and so is a rendition `bitrate`, `quality.bitrate` or `buffer_ms` without it. The
 `hls-h264-cbr` system preset is H.264 HLS at 5M, 3M, 1200k and 800k for 1080p, 720p, 480p and 360p.
 
+### Audio: MP3, audio-only, channels
+
+`mode: 'audio'` writes the audio alone as one `.mp3` file (label `audio`, width and height 0), billed per output
+minute at the SD rate. A `single` job whose input has no video becomes audio-only by itself. `audio.mode: 'mp3'`
+puts constant bit rate MP3 in a single MP4 or an audio-only output (not HLS), stereo at most; its `bitrate` is one of
+32k, 40k, 48k, 56k, 64k, 80k, 96k, 112k, 128k, 160k, 192k, 224k, 256k or 320k (default 128k stereo, 64k mono).
+
+`audio.channels` is `'source'` (the default), `'mono'`, `'stereo'`, `'5.1'` or `'7.1'` (`AUDIO_CHANNELS`); it
+downmixes and never upmixes. In HLS with surround audio, `audio.stereo_fallback: true` adds a stereo rendition to the
+same audio group for players that cannot play surround.
+
+```ts
+// A podcast episode from a video recording.
+await transcdr.jobs.create({ input, output: { mode: 'audio', audio: { mode: 'mp3', bitrate: '128k', channels: 'stereo' } } });
+
+// Surround HLS with a stereo rendition beside it.
+await transcdr.jobs.create({ input, output: { mode: 'hls', codec: 'h264', audio: { channels: '5.1', stereo_fallback: true } } });
+```
+
+The `audio-mp3-podcast` and `audio-mp3-speech` system presets (category `audio`) are MP3 at 128k stereo and 64k mono.
+
 ## Configuration
 
 ```ts
