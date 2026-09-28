@@ -12,6 +12,8 @@ import {
   WaitTimeoutError,
   buildQuery,
   AUDIO_CHANNELS,
+  FITS,
+  ORIENTATIONS,
   type Audio,
   type OutputSpecInput,
 } from '../src';
@@ -105,6 +107,37 @@ describe('requests', () => {
     expect(got.output.audio).toEqual(audio);
     expect(got.output.audio?.bit_depth).toBe('24');
     expect(got.output.audio?.container).toBe('m4a');
+  });
+
+  it('sends fit, upscale and a rendition\'s own fitting as written', async () => {
+    const output: OutputSpecInput = {
+      fit: 'pad',
+      upscale: true,
+      renditions: [
+        { width: 1920, height: 1080 },
+        { width: 1080, height: 1920, fit: 'cover', orientation: 'fixed', upscale: false },
+      ],
+    };
+    const { fetch, calls } = mockFetch(json(job('job_1')));
+    await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, output });
+    expect((calls[0].body as { output: unknown }).output).toEqual(output);
+    expect(FITS).toEqual(['contain', 'cover', 'pad', 'stretch']);
+    expect(ORIENTATIONS).toEqual(['auto', 'fixed']);
+  });
+
+  it('reads fit, upscale and the display size back from a job', async () => {
+    const { fetch } = mockFetch(
+      json({
+        ...job('job_1'),
+        output: { fit: 'contain', upscale: false, renditions: [{ width: 1080, height: 1920, fit: 'cover' }] },
+        input_info: { width: 720, height: 576, display_width: 1024, display_height: 576 },
+      }),
+    );
+    const got = await client(fetch).jobs.retrieve('job_1');
+    expect(got.output.fit).toBe('contain');
+    expect(got.output.upscale).toBe(false);
+    expect(got.output.renditions[0].fit).toBe('cover');
+    expect(got.input_info?.display_width).toBe(1024);
   });
 
   it('generates an Idempotency-Key for jobs.create and uploads.create', async () => {

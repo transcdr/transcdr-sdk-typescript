@@ -97,6 +97,32 @@ await transcdr.jobs.create({
 `crf` with `'cbr'` is refused, and so is a rendition `bitrate`, `quality.bitrate` or `buffer_ms` without it. The
 `hls-h264-cbr` system preset is H.264 HLS at 5M, 3M, 1200k and 800k for 1080p, 720p, 480p and 360p.
 
+### Rendition sizes are maximums: fit and upscale
+
+A rendition's `width` × `height` is the largest it may be, not its exact size. The video keeps its shape inside the
+box, a portrait video turns a landscape box portrait, and nothing is enlarged past the source: a 640×480 video
+through a 1920×1080 rendition comes out 640×480 (and is billed as SD). Each output reports the size it came out at.
+
+- `fit: 'contain'` (default) keeps the shape inside the box; `'cover'` fills the box and centre-crops; `'pad'` adds
+  black bars to exactly the box; `'stretch'` distorts the picture to exactly the box.
+- `upscale: true` lets a rendition be larger than the source. Without it, renditions that would come out the same
+  size are produced once.
+- A rendition may set its own `fit`, `upscale` and `orientation` (`'fixed'` keeps its box as written).
+
+```ts
+await transcdr.jobs.create({
+  input,
+  output: {
+    renditions: [
+      { width: 1920, height: 1080 }, // up to 1080p, the video's own shape
+      { width: 1080, height: 1920, fit: 'cover', orientation: 'fixed' }, // 9:16, a landscape video cropped
+    ],
+    fit: 'contain',
+    upscale: false,
+  },
+});
+```
+
 ### Audio: AAC, lossless, MP3, audio-only, channels
 
 `audio.mode` is `'auto'` (the default: compatible audio passes through, the rest becomes Opus), `'opus'`, `'aac'`,

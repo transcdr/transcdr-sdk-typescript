@@ -67,6 +67,20 @@ export type AudioContainer = 'auto' | 'mp3' | 'flac' | 'm4a';
 export type AudioChannels = 'source' | 'mono' | 'stereo' | '5.1' | '7.1';
 /** Every audio channel layout, in display order. */
 export const AUDIO_CHANNELS = ['source', 'mono', 'stereo', '5.1', '7.1'] as const;
+/**
+ * How a video meets a rendition's box: `contain` (default) keeps its shape inside the box, `cover` fills the box and
+ * centre-crops, `pad` keeps its shape and adds black bars to exactly the box, `stretch` distorts it to exactly the box.
+ */
+export type Fit = 'contain' | 'cover' | 'pad' | 'stretch';
+/** Every fit, in display order. */
+export const FITS = ['contain', 'cover', 'pad', 'stretch'] as const;
+/**
+ * `auto` (default): a rendition's box turns to the video's orientation, so 1920×1080 on a portrait video is 1080×1920.
+ * `fixed`: the box is used as written.
+ */
+export type Orientation = 'auto' | 'fixed';
+/** Every orientation. */
+export const ORIENTATIONS = ['auto', 'fixed'] as const;
 export type Color = 'sdr' | 'hdr10' | 'hlg' | 'passthrough';
 export type BitDepth = 'auto' | '8bit' | '10bit';
 /**
@@ -75,10 +89,15 @@ export type BitDepth = 'auto' | '8bit' | '10bit';
  */
 export type QualityTarget = 'visually_lossless' | 'high' | 'standard' | 'low' | `vmaf=${number}` | 'cbr';
 
+/**
+ * One output. `width` × `height` is the largest it may be: the video keeps its shape inside that box (see
+ * `OutputSpec.fit`) and is not enlarged past its own size unless `upscale` is on. Each output reports the size it
+ * came out at.
+ */
 export interface Rendition {
-  /** Even, 64–7680. */
+  /** Maximum width; even, 64–7680. */
   width: number;
-  /** Even, 64–4320. */
+  /** Maximum height; even, 64–4320. */
   height: number;
   /**
    * This rendition's constant bitrate, such as `"3M"` or `"800k"` (100k–200M), when
@@ -86,8 +105,14 @@ export interface Rendition {
    * or a default for its resolution and codec.
    */
   bitrate?: string | null;
-  /** Display label, 1–32 of `[A-Za-z0-9_-]`; defaults to `"<short side>p"`. */
+  /** Display label, 1–32 of `[A-Za-z0-9_-]`; defaults to `"<short side>p"` of the size it comes out at. */
   label?: string | null;
+  /** This rendition's own fit, over `OutputSpec.fit`. */
+  fit?: Fit | null;
+  /** `fixed` keeps this rendition's box as written, e.g. a 9:16 `cover` rendition that crops a landscape video. */
+  orientation?: Orientation | null;
+  /** This rendition's own `upscale`, over `OutputSpec.upscale`. */
+  upscale?: boolean | null;
 }
 
 export interface Ladder {
@@ -135,6 +160,10 @@ export interface OutputSpec {
   mode: Mode;
   codec: Codec;
   renditions: Rendition[];
+  /** How the video meets each rendition's box; `contain` unless set. */
+  fit: Fit;
+  /** Let a rendition be larger than the source; `false` unless set. */
+  upscale: boolean;
   ladder: Ladder | null;
   quality: Quality;
   gop: number | null;
@@ -153,6 +182,10 @@ export interface OutputSpecInput {
   mode?: Mode;
   codec?: Codec;
   renditions?: Rendition[];
+  /** `contain` (default), `cover`, `pad` or `stretch`. */
+  fit?: Fit;
+  /** Let a rendition be larger than the source (default `false`). */
+  upscale?: boolean;
   ladder?: Ladder | null;
   quality?: Quality;
   gop?: number | null;
@@ -197,6 +230,10 @@ export interface MediaInfo {
   audio: AudioStream[];
   subtitles: SubtitleStream[];
   size_bytes: number;
+  /** Non-square pixels only: the width the picture is shown at (720×576 at 64:45 is shown 1024×576). */
+  display_width?: number;
+  /** Non-square pixels only: the height the picture is shown at. */
+  display_height?: number;
 }
 
 // ---------------------------------------------------------------------------
