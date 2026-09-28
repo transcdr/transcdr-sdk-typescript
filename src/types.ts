@@ -55,6 +55,17 @@ export type AudioBitDepth = 'source' | '16' | '24';
 /** FLAC compression effort: the same audio either way, a smaller file for more work. Default `default`. */
 export type FlacCompression = 'fast' | 'default' | 'best';
 /**
+ * What an HE-AAC (or HE-AAC v2) source becomes. HE-AAC is decoded only as its AAC-LC core: spectral band replication
+ * and parametric stereo are not decoded, so the core has half the stream's sample rate, less bandwidth and, for v2, one
+ * channel. `auto` (the default) passes it through when only a codec change is asked and decodes its core when the job
+ * needs PCM (a downmix, an `.mp3` or `.flac` file); `passthrough` never decodes it, and a job that would need it
+ * decoded fails; `core` decodes its core whenever another codec is asked. AAC-LC sources are decoded in full whatever
+ * it says.
+ */
+export type HeAac = 'auto' | 'passthrough' | 'core';
+/** Every HE-AAC policy, in display order. */
+export const HE_AAC = ['auto', 'passthrough', 'core'] as const;
+/**
  * The file audio-only output is. `auto` (the default) follows the codec: `.flac` for FLAC, `.m4a` for ALAC, `.mp3`
  * otherwise (`auto` audio is then MP3). `m4a` holds any codec (`auto` audio in an `.m4a` is Opus); `.flac` holds FLAC
  * only and `.mp3` holds MP3 only.
@@ -148,6 +159,8 @@ export interface Audio {
   flac_compression?: FlacCompression;
   /** Mode `audio` only: the file the output is. Left out, `auto`. */
   container?: AudioContainer;
+  /** What an HE-AAC source becomes. Left out, `auto`. Not with `drop`. */
+  he_aac?: HeAac;
 }
 
 export interface Trim {

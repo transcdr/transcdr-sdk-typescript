@@ -13,6 +13,7 @@ import {
   buildQuery,
   AUDIO_CHANNELS,
   FITS,
+  HE_AAC,
   ORIENTATIONS,
   type Audio,
   type OutputSpecInput,
@@ -92,12 +93,22 @@ describe('requests', () => {
       { mode: 'single', audio: { mode: 'flac', bit_depth: 'source', flac_compression: 'fast' } },
       { mode: 'hls', audio: { mode: 'aac', channels: '5.1', stereo_fallback: true } },
       { mode: 'audio', audio: { mode: 'mp3', container: 'mp3' } },
+      { mode: 'single', audio: { mode: 'opus', channels: 'stereo', he_aac: 'passthrough' } },
+      { mode: 'audio', audio: { mode: 'flac', container: 'flac', he_aac: 'core' } },
     ];
     for (const output of outputs) {
       const { fetch, calls } = mockFetch(json(job('job_1')));
       await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, output });
       expect((calls[0].body as { output: unknown }).output).toEqual(output);
     }
+  });
+
+  it('reads he_aac back from a job, and lists the policies', async () => {
+    const audio: Audio = { mode: 'mp3', he_aac: 'auto' };
+    const { fetch } = mockFetch(json({ ...job('job_1'), output: { mode: 'audio', audio } }));
+    const got = await client(fetch).jobs.retrieve('job_1');
+    expect(got.output.audio?.he_aac).toBe('auto');
+    expect(HE_AAC).toEqual(['auto', 'passthrough', 'core']);
   });
 
   it('reads bit_depth, flac_compression and container back from a job', async () => {
