@@ -1,7 +1,7 @@
 # @transcdr/sdk
 
-The official TypeScript SDK for [Transcdr](https://transcdr.com): GPU-accelerated AV1, H.264 and H.265 transcoding
-with MP4 and CMAF/HLS output, behind one small REST API.
+The official TypeScript SDK for [Transcdr](https://transcdr.com): fast AV1, H.264 and H.265 transcoding with MP4 and
+CMAF/HLS output, audio-only and image output, behind one small REST API.
 
 - Zero runtime dependencies. Uses the platform `fetch`.
 - Works in Node 18+, Deno, Bun, edge runtimes and browsers.
@@ -14,10 +14,10 @@ with MP4 and CMAF/HLS output, behind one small REST API.
 The package is installed from GitHub (it is not on the npm registry); it builds on install:
 
 ```sh
-npm install github:transcdr/transcdr-sdk-typescript#v0.5.0
+npm install github:transcdr/transcdr-sdk-typescript#v1.0.0
 ```
 
-It is imported as `@transcdr/sdk`.
+It is imported as `@transcdr/sdk`. Version 1.0 speaks output spec v2; see [Migrating from v1](#migrating-from-v1).
 
 ## Quickstart
 
@@ -35,7 +35,7 @@ const asset = await transcdr.uploads.uploadFile(await readFile('keynote.mov'), {
   contentType: 'video/quicktime',
 });
 
-// 2. Transcode with a system preset (override any field with `output`).
+// 2. Transcode with a system preset (change any field with `output`; see "Presets, versions and overrides").
 const job = await transcdr.jobs.create({
   input: { type: 'asset', asset_id: asset.id },
   preset: 'hls-av1-abr',
@@ -70,147 +70,215 @@ Already hosting the source? Skip the upload:
 await transcdr.jobs.create({ input: { type: 'url', url: 'https://example.com/in.mp4' }, preset: 'web-av1-1080p' });
 ```
 
-### Constant bit rate
+## The output spec
 
-By default each rendition is coded to a quality level (`quality.target`, or a `crf`), so its bitrate follows the
-content. When a player, network or broadcast chain needs predictable bandwidth, set `quality.target: 'cbr'` and
-every rendition is coded at a constant bit rate: its own `bitrate`, else `quality.bitrate`, else a default for
-its resolution and codec (H.264 about 5 Mb/s at 1080p30, 3 at 720p, 1.2 at 480p and 0.8 at 360p; H.265 about
-0.65× that and AV1 about 0.5×; more above 30 fps). `quality.buffer_ms` (100–10000, default 1000) sets the rate
-buffer. Rates are 100k to 200M.
+A job either names a preset or gives its whole output spec (v2). The spec is declared in sections, and **nothing has
+a default**: it states every field its kind, container, codec and audio handling need. Where the output should
+follow the source, you write that as a value: `'source'`, `'standard'`, `'from_color'`, `'by_size'`, `'poster'`,
+`'segment'`, `'all'`.
+
+| Section | Describes | For kind |
+|---|---|---|
+| `kind` | What is produced: `'video'`, `'audio'` or `'image'` | all |
+| `container` | The file or package: `{ format: 'mp4' }`, `{ format: 'hls', segment_seconds }`, or `'mp3'`, `'flac'`, `'m4a'` | video, audio |
+| `video` | `codec`, one of `quality` / `crf` / `cbr`, `bit_depth`, `color`, `frame_rate.max`, `gop`, `filters` | video |
+| `audio` | `handling` (`'auto'`, `'encode'`, `'drop'`) and, with a track, `codec`, `bitrate`, `channels`, `he_aac`, … | video, audio |
+| `image` | `formats`, `quality` per lossy format, `lossless` (WebP), `color_profile`, `frames` | image |
+| `renditions` | One of `sizes`, `ladder` (video) or `source_size` | video, image |
+| `subtitles` | `{ tracks: 'all' \| 'none' }` or `{ languages: ['eng'] }` | video |
+| `trim` | `{ start, end }`, `end` in seconds or `'source'` | video |
+| `privacy` | `{ preset }`, or all of `location`, `capture_time`, `device`, `descriptive` | all |
+
+`OutputSpec` is `VideoOutput | AudioOutput | ImageOutput`, and every field a kind always needs is required in its type.
+Exclusive choices are unions, so giving both `quality` and `crf`, or a `preset` beside privacy fields, does not
+type-check. A field whose need depends on another (an audio `bitrate` for a lossy codec, `stereo_fallback` in HLS,
+`image.quality` for a lossy format, a lossless codec's `bit_depth`) is optional in the type and checked at runtime.
+
+### Values that follow the source
+
+| Value | Resolves to |
+|---|---|
+| `video.frame_rate.max: 'source'` | the source's frame rate, not capped |
+| `video.bit_depth: 'from_color'` | 8-bit for `sdr`, 10-bit for `hdr10` / `hlg`, the source's for `passthrough` |
+| `video.cbr.bitrate: 'standard'` | a rate for each size by codec, short side and frame rate: H.264 at 30 fps about 5M at 1080p, 3M at 720p, 1.2M at 480p, 0.8M at 360p; H.265 about 0.65× that, AV1 about 0.5×; more above 30 fps |
+| `video.gop: 'segment'` | HLS: one keyframe at the start of each segment and none inside it |
+| `audio.bitrate: 'standard'` | AAC 64k mono, 128k stereo, 384k 5.1, 512k 7.1; Opus 96k stereo, 320k 5.1, 416k 7.1; MP3 64k mono, 128k stereo |
+| `audio.channels: 'source'` | the source's layout (MP3 folds a wider one to stereo) |
+| `audio.bit_depth: 'source'` | 16-bit for a 16-bit or lossy source, 24-bit for a deeper one |
+| `audio.he_aac: 'auto'` | an HE-AAC source is kept where only a codec change is asked, and its core decoded where the job needs PCM |
+| `audio.handling: 'auto'` | the source's audio is kept where the container carries it, otherwise made `codec` |
+| `label: 'by_size'` | video: `<short side>p` of the size it comes out at; image: `<width>x<height>` |
+| `trim.end: 'source'` | the end of the source |
+| `image.frames: 'poster'` | an image input as it is; a video's frame 10% of the way in |
+| `subtitles.tracks: 'all'` | every subtitle track of the source |
+
+### Checked before it is sent
+
+`jobs.create`, `presets.create` and `presets.replace` check a whole spec against the same table of required fields
+the API uses, and throw an `InvalidRequestError` without sending anything when fields are missing or given where they
+do not apply. Its `errors` lists **every** failure at once, in the API's words and order, as a 422 would:
 
 ```ts
-await transcdr.jobs.create({
-  input,
-  output: {
-    mode: 'hls',
+import { InvalidRequestError, validateOutput } from '@transcdr/sdk';
+
+try {
+  await transcdr.jobs.create({ input, output: spec });
+} catch (err) {
+  if (err instanceof InvalidRequestError) {
+    for (const e of err.errors) console.error(e.param, e.message);
+    // output.audio.bitrate  output.audio.bitrate is required when kind is video or audio and audio.handling is auto or encode and audio.codec is opus, mp3 or aac.
+    // output.privacy        output.privacy is required: give privacy.preset (strip_all, strip_location or keep_all), or …
+  }
+}
+
+validateOutput(spec); // the same check, returning the list ([] when complete)
+```
+
+Values against each other (HDR color with 8-bit, MP3 in HLS, a size above the plan's maximum) are checked by the API.
+`capabilities.retrieve()` returns the same table as data under `output.fields` and `output.groups`.
+
+### ABR HLS, H.264 at a constant bit rate
+
+```ts
+import type { OutputSpec } from '@transcdr/sdk';
+
+const hls: OutputSpec = {
+  kind: 'video',
+  container: { format: 'hls', segment_seconds: 6 },
+  video: {
     codec: 'h264',
-    renditions: [
-      { width: 1920, height: 1080, bitrate: '5M' },
-      { width: 1280, height: 720 }, // takes quality.bitrate
-    ],
-    quality: { target: 'cbr', bitrate: '3M', buffer_ms: 1000 },
+    cbr: { bitrate: 'standard', buffer_ms: 1000 }, // or quality: 'standard', or crf: 23
+    bit_depth: 'from_color',
+    color: 'sdr',
+    frame_rate: { max: 'source' },
+    gop: 'segment',
+    filters: [],
   },
-});
+  audio: { handling: 'encode', codec: 'aac', bitrate: 'standard', channels: 'source', he_aac: 'auto', stereo_fallback: false },
+  renditions: {
+    sizes: [
+      { label: 'by_size', width: 1920, height: 1080, fit: 'contain', orientation: 'auto', upscale: false, video: { cbr: { bitrate: '5M' } } },
+      { label: 'by_size', width: 1280, height: 720, fit: 'contain', orientation: 'auto', upscale: false, video: { cbr: { bitrate: '3M' } } },
+    ],
+  },
+  subtitles: { tracks: 'all' },
+  trim: { start: 0, end: 'source' },
+  privacy: { preset: 'strip_all' },
+};
+await transcdr.jobs.create({ input, output: hls });
+
+// An automatic ladder instead of explicit sizes:
+// renditions: { ladder: { max_short_side: 1080, fit: 'contain', upscale: false } }
 ```
 
-`crf` with `'cbr'` is refused, and so is a rendition `bitrate`, `quality.bitrate` or `buffer_ms` without it. The
-`hls-h264-cbr` system preset is H.264 HLS at 5M, 3M, 1200k and 800k for 1080p, 720p, 480p and 360p.
+With `cbr`, each size is coded at its own `video.cbr.bitrate` (optional), else `video.cbr.bitrate`; the rate is held
+within `buffer_ms` (100–10000). Rates are 100k to 200M. HLS `BANDWIDTH` states each rung's rate.
 
-### Rendition sizes are maximums: fit and upscale
-
-A rendition's `width` × `height` is the largest it may be, not its exact size. The video keeps its shape inside the
-box, a portrait video turns a landscape box portrait, and nothing is enlarged past the source: a 640×480 video
-through a 1920×1080 rendition comes out 640×480 (and is billed as SD). Each output reports the size it came out at.
-
-- `fit: 'contain'` (default) keeps the shape inside the box; `'cover'` fills the box and centre-crops; `'pad'` adds
-  black bars to exactly the box; `'stretch'` distorts the picture to exactly the box.
-- `upscale: true` lets a rendition be larger than the source. Without it, renditions that would come out the same
-  size are produced once.
-- A rendition may set its own `fit`, `upscale` and `orientation` (`'fixed'` keeps its box as written).
+### One MP4
 
 ```ts
 await transcdr.jobs.create({
   input,
   output: {
-    renditions: [
-      { width: 1920, height: 1080 }, // up to 1080p, the video's own shape
-      { width: 1080, height: 1920, fit: 'cover', orientation: 'fixed' }, // 9:16, a landscape video cropped
-    ],
-    fit: 'contain',
-    upscale: false,
+    kind: 'video',
+    container: { format: 'mp4' },
+    video: { codec: 'h264', quality: 'high', bit_depth: 'from_color', color: 'sdr', frame_rate: { max: 30 }, gop: { seconds: 2 }, filters: [] },
+    audio: { handling: 'encode', codec: 'aac', bitrate: 'standard', channels: 'source', he_aac: 'auto' },
+    renditions: {
+      sizes: [{ label: 'by_size', width: 1080, height: 1920, fit: 'cover', orientation: 'fixed', upscale: false }],
+    },
+    subtitles: { tracks: 'all' },
+    trim: { start: 0, end: 'source' },
+    privacy: { preset: 'strip_all' },
   },
 });
 ```
 
-### Audio: AAC, lossless, MP3, audio-only, channels
+### Sizes are maximums: fit and upscale
 
-`audio.mode` is `'auto'` (the default: compatible audio passes through, the rest becomes Opus), `'opus'`, `'aac'`,
-`'mp3'`, `'flac'`, `'alac'` or `'drop'`.
+A size's `width` × `height` is a box the picture is fitted into, not its exact size. Each output reports the size it
+came out at (`outputs[].width` / `height`).
 
-- `'aac'` is AAC-LC, the audio that plays on the most devices: every browser, iPhone, Android phone and TV. An AAC
-  source passes through. It works in a single MP4, HLS and audio-only `.m4a` output. `bitrate` is 8k to 288k per main
-  channel (the LFE of 5.1 and 7.1 does not count); the default is 64k mono, 128k stereo, 384k 5.1 and 512k 7.1.
-- `'flac'` and `'alac'` are lossless: a source already in that codec is copied, and they take no `bitrate`. Both work
-  in a single MP4, HLS and audio-only output. `audio.bit_depth` is `'source'` (the default: 16-bit for a 16-bit or
-  lossy source, 24-bit for a deeper one), `'16'` or `'24'`. For FLAC, `audio.flac_compression` is `'fast'`,
-  `'default'` or `'best'`: the same audio either way, a smaller file for more work.
-- `'mp3'` is constant bit rate, stereo at most, in a single MP4 or audio-only output (not HLS); its `bitrate` is one
-  of 32k, 40k, 48k, 56k, 64k, 80k, 96k, 112k, 128k, 160k, 192k, 224k, 256k or 320k (default 128k stereo, 64k mono).
+- `fit` (`FITS`): `'contain'` keeps the shape inside the box; `'cover'` fills the box and centre-crops; `'pad'` adds
+  black bars to exactly the box; `'stretch'` distorts the picture to exactly the box.
+- `orientation`: `'auto'` turns the box to the picture's orientation (1920×1080 on a portrait video is 1080×1920);
+  `'fixed'` uses it as written, so a 1080×1920 `'cover'` size crops a landscape video to 9:16.
+- `upscale: true` lets a size be larger than the source. Without it, sizes that come out the same are made once.
+- `ladder` makes the standard short sides up to `max_short_side`, never above the source; `source_size` makes one
+  output at the source's size.
 
-AAC sources are decoded, so they can be downmixed or made Opus, MP3, FLAC or ALAC; they still pass through wherever
-nothing asks for a change. HE-AAC is decoded only as its AAC-LC core (no spectral band replication or parametric
-stereo: half the rate, less bandwidth), and `audio.he_aac` (`HE_AAC`) says what an HE-AAC source becomes: `'auto'`
-(the default) passes it through when only a codec change is asked and decodes its core when the job needs PCM (a
-downmix, an `.mp3` or `.flac` file); `'passthrough'` never decodes it, failing a job that would need it; `'core'`
-decodes its core whenever another codec is asked. AAC-LC sources are decoded in full whatever it says.
+### Audio
 
-`mode: 'audio'` writes the audio alone as one file (label `audio`, width and height 0), billed per output minute at
-the SD rate. `audio.container` picks the file: `'auto'` (the default) follows the codec, a `.flac` for FLAC, an
-`.m4a` for ALAC and an `.mp3` otherwise (`'auto'` audio is then MP3); `'m4a'` holds any codec (`'auto'` audio in an
-`.m4a` is Opus); `'flac'` holds FLAC only and `'mp3'` MP3 only. The file is `audio.mp3` (`audio/mpeg`), `audio.flac`
-(`audio/flac`) or `audio.m4a` (`audio/mp4`). `container` applies only to mode `'audio'`. A `single` job whose input
-has no video becomes audio-only by itself; with AAC or Opus audio it is an `.m4a`.
+- `handling: 'auto'` keeps compatible audio as it is (AAC, Opus, AC-3, E-AC-3, DTS; MP3 too into an MP4) and makes the
+  rest `codec`, which must be `'opus'` (`'mp3'` in an `.mp3`). `'encode'` makes `codec`, copying a source already in
+  it when nothing else changes. `'drop'` (video only) has no track, and takes no other audio field.
+- `'aac'` is AAC-LC, which every browser, iPhone, Android device, TV and editor plays: choose it for reach. It takes
+  8k to 288k per main channel (the LFE does not count).
+- `'mp3'` is constant bit rate at 32k, 40k, 48k, 56k, 64k, 80k, 96k, 112k, 128k, 160k, 192k, 224k, 256k or 320k,
+  stereo at most; for an MP4 or an `.mp3`, not HLS.
+- `'flac'` and `'alac'` are lossless and take no `bitrate`; they need `bit_depth` (`'source'`, `'16'`, `'24'`), and
+  FLAC needs `flac_compression` (`'fast'`, `'balanced'`, `'best'`: the same audio, a smaller file for more work).
+- `channels` (`AUDIO_CHANNELS`) sets the layout, or `'source'` keeps the source's. Audio is never upmixed.
+- `stereo_fallback` is required in HLS with a track: `true` adds a stereo downmix beside surround audio.
+- `he_aac` (`HE_AAC`): HE-AAC decodes only as its AAC-LC core (half the sample rate, less bandwidth). `'auto'` keeps an
+  HE-AAC source where only a codec change is asked and decodes its core where the job needs PCM; `'passthrough'`
+  never decodes it (a job that would need it fails); `'core'` decodes its core whenever another codec or a change is
+  asked.
 
-`audio.channels` is `'source'` (the default), `'mono'`, `'stereo'`, `'5.1'` or `'7.1'` (`AUDIO_CHANNELS`); it
-downmixes and never upmixes. In HLS with surround audio, `audio.stereo_fallback: true` adds a stereo rendition to the
-same audio group for players that cannot play surround.
+`kind: 'audio'` writes the audio alone as one file, labelled `audio`: `audio.mp3` (`audio/mpeg`, MP3 only),
+`audio.flac` (`audio/flac`, FLAC only) or `audio.m4a` (`audio/mp4`, any codec), billed per output minute at the SD rate.
 
 ```ts
 // A podcast episode from a video recording.
-await transcdr.jobs.create({ input, output: { mode: 'audio', audio: { mode: 'mp3', bitrate: '128k', channels: 'stereo' } } });
-
-// AAC in an .m4a for phones and browsers.
-await transcdr.jobs.create({ input, output: { mode: 'audio', audio: { mode: 'aac', container: 'm4a' } } });
-
-// A lossless 24-bit FLAC master.
-await transcdr.jobs.create({ input, output: { mode: 'audio', audio: { mode: 'flac', bit_depth: '24', flac_compression: 'best' } } });
-
-// Stereo Opus from any source, never decoding an HE-AAC one to its core.
-await transcdr.jobs.create({ input, output: { codec: 'h264', audio: { mode: 'opus', channels: 'stereo', he_aac: 'passthrough' } } });
-
-// Surround AAC in HLS with a stereo rendition beside it.
-await transcdr.jobs.create({ input, output: { mode: 'hls', codec: 'h264', audio: { mode: 'aac', channels: '5.1', stereo_fallback: true } } });
-```
-
-Audio system presets (category `audio`): `audio-mp3-podcast` and `audio-mp3-speech` (MP3 at 128k stereo and 64k
-mono), `audio-aac-m4a` (AAC in an `.m4a`) and `audio-alac-m4a` (Apple Lossless in an `.m4a`). In category `archive`,
-`audio-flac` is a native `.flac` at best compression and `archive-av1-flac` is visually lossless AV1 with FLAC audio
-in one MP4. The reach presets (`mp4-h264-compat-1080p`, `mp4-h265-1080p`, `hls-h264-abr`, `hls-h264-cbr`,
-`social-vertical-1080x1920`, `hls-h264-surround` and `mp4-h264-surround-1080p`, now in category `tv`) use AAC audio.
-
-### Image jobs
-
-`mode: 'image'` makes still images, of an image input (JPEG, PNG, WebP, AVIF, GIF, TIFF, BMP, HEIC) or taken from a
-video. Every rendition is made in every format in `image.formats` (`IMAGE_FORMATS`): `'avif'` (the default), `'webp'`,
-`'jpeg'` and `'png'`, one to four of them. Image renditions are 16 to 8192 on a side, odd sizes allowed, and fit as
-video renditions do.
-
-- `image.quality` (1 to 100) applies to the lossy formats; left out, each has its own default (AVIF 60, WebP 80,
-  JPEG 82). `image.lossless: true` makes WebP lossless; PNG always is.
-- Outputs are upright, sRGB unless `image.keep_color_profile: true`, and never carry EXIF, XMP or GPS.
-- From a video, `image.frames` picks the stills: `{ at_seconds: [1.5, 10] }` or `{ count: 12 }` evenly spaced. Left
-  out, one frame 10% of the way in.
-- Each output carries its `format`, its `rendition`, and for a video's stills its `frame` (from 1) and `at_seconds`.
-- Images are billed per output image by the pixels it came out at: `billing.billable_images` counts them and
-  `billing.tier` is `'up_to_1mp'`, `'up_to_4mp'` or `'over_4mp'` (`IMAGE_TIERS`). The prices are `image_rates` on a
-  plan and on `billing.retrieve()`.
-
-```ts
-// A photo as AVIF with a JPEG fallback, at two sizes.
-const job = await transcdr.jobs.create({
+await transcdr.jobs.create({
   input,
   output: {
-    mode: 'image',
-    renditions: [{ width: 1920, height: 1920 }, { width: 640, height: 640, label: 'small' }],
-    image: { formats: ['avif', 'jpeg'], quality: 70 },
+    kind: 'audio',
+    container: { format: 'mp3' },
+    audio: { handling: 'encode', codec: 'mp3', bitrate: '64k', channels: 'mono', he_aac: 'auto' },
+    privacy: { preset: 'strip_all' },
   },
 });
 
-// Twelve evenly spaced JPEG stills of a video.
+// A lossless 24-bit FLAC master that keeps the recording date and tags.
 await transcdr.jobs.create({
   input,
-  output: { mode: 'image', renditions: [{ width: 480, height: 270 }], image: { formats: ['jpeg'], frames: { count: 12 } } },
+  output: {
+    kind: 'audio',
+    container: { format: 'flac' },
+    audio: { handling: 'encode', codec: 'flac', bit_depth: '24', flac_compression: 'best', channels: 'source', he_aac: 'auto' },
+    privacy: { location: 'strip', capture_time: 'keep', device: 'strip', descriptive: 'keep' },
+  },
+});
+```
+
+### Image jobs
+
+`kind: 'image'` makes still images, of an image input (JPEG, PNG, WebP, AVIF, GIF, TIFF, BMP, HEIC) or taken from a
+video. Every size is made in every format in `image.formats` (`IMAGE_FORMATS`: `'avif'`, `'webp'`, `'jpeg'`,
+`'png'`, one to four). Image sizes are 16 to 8192 on a side, odd sizes allowed.
+
+- `image.quality` has one entry, 1 to 100, for each lossy format made and no others: `{ avif: 60, jpeg: 82 }`.
+  `image.lossless` is required with WebP (`true` makes it lossless, and then it takes no quality); PNG always is.
+- `image.color_profile`: `'srgb'` converts; `'keep'` keeps the source's profile (PNG, JPEG, WebP).
+- `image.frames`: `'poster'` (an image as it is; a video's frame 10% in), or for a video `{ count: 12 }` evenly spaced
+  or `{ at_seconds: [1.5, 10] }`.
+- Each output carries its `format`, its `rendition`, and for a video's stills its `frame` (from 1) and `at_seconds`.
+- Images are billed per output image by the pixels it came out at: `billing.billable_images` counts them and
+  `billing.tier` is `'up_to_1mp'`, `'up_to_4mp'` or `'over_4mp'` (`IMAGE_TIERS`).
+
+```ts
+// Twelve evenly spaced JPEG stills of a video.
+const job = await transcdr.jobs.create({
+  input,
+  output: {
+    kind: 'image',
+    image: { formats: ['jpeg'], quality: { jpeg: 80 }, color_profile: 'srgb', frames: { count: 12 } },
+    renditions: {
+      sizes: [{ label: 'sheet', width: 320, height: 320, fit: 'contain', orientation: 'auto', upscale: false }],
+    },
+    privacy: { preset: 'strip_all' },
+  },
 });
 
 const done = await transcdr.jobs.waitFor(job.id);
@@ -218,9 +286,127 @@ for (const o of done.outputs) console.log(o.rendition, o.format, o.url);
 console.log(done.billing?.billable_images, done.billing?.tier);
 ```
 
-Image system presets (category `image`): `web-avif` and `web-webp` (1920, 1280 and 640 wide), `thumbnail-jpeg`,
-`png-lossless`, `video-poster` (AVIF and JPEG of the frame 10% in) and `contact-sheet` (12 evenly spaced JPEG stills
-of a video). `capabilities.retrieve()` lists the `image_formats`, the `input_image_formats` and `limits.image`.
+### Privacy
+
+`privacy` says which identifying metadata survives: a `preset` alone (`'strip_all'`, `'strip_location'`,
+`'keep_all'`), or all four categories: `location` (`'strip'`, `'approximate'`, `'keep'`), `capture_time` (`'strip'`,
+`'date'`, `'keep'`), `device` (`'strip'`, `'keep'`, `'keep_all'`) and `descriptive` (`'strip'`, `'keep'`). Responses
+always show the four categories. HLS keeps nothing.
+
+## Presets, versions and overrides
+
+A preset is a complete spec, and presets are versioned: editing a preset's output adds a version, and a version
+never changes. Name one by slug or id for its latest version, or `slug@N` to pin version N. With a preset, `output`
+gives only what to change (`OutputOverrides`):
+
+| In `output` | Effect |
+|---|---|
+| an object | merged key by key |
+| a scalar or an array (`sizes`, `formats`, `filters`, …) | replaces |
+| one choice of a group (`quality` / `crf` / `cbr`, `sizes` / `ladder` / `source_size`, `tracks` / `languages`) | replaces the others |
+| `privacy.preset` | replaces the preset's privacy |
+| `null` | removes the field |
+| `kind` | cannot change |
+
+The merged result must be complete; a field left dangling (`segment_seconds` after switching to `mp4`) is refused by
+name, so set it to `null`. The SDK does not check overrides (it does not know the preset's content); the API does.
+
+```ts
+const job = await transcdr.jobs.create({
+  input,
+  preset: 'social-vertical-1080x1920@1',
+  output: { video: { frame_rate: { max: 24 } } },
+});
+job.preset; // { id: 'social-vertical-1080x1920@1', version: 1, overrides: { video: { frame_rate: { max: 24 } } } }
+job.output; // the resolved, complete spec: what runs
+
+await transcdr.jobs.create({ input, preset: 'hls-h264-abr', output: { container: { format: 'mp4', segment_seconds: null }, video: { gop: { seconds: 2 } }, audio: { stereo_fallback: null } } });
+
+const versions = await transcdr.presets.versions('pre_…'); // every version, oldest first
+const v1 = await transcdr.presets.getVersion('pre_…', 1); // the preset as it was at version 1
+await transcdr.presets.update('pre_…', { output: { video: { crf: 28 } } }); // a new version
+```
+
+A job's `output` is always the resolved spec, and `preset` is `{ id, version, overrides }`, or `null` for a job given
+its whole spec. An automation's `output` is its overrides, and `resolved_output` the spec they resolve to now.
+
+## Migrating from v1
+
+1.0 speaks output spec v2 only. The flat v1 spec (`mode`, `codec`, `quality`, a `renditions` list, `audio.mode`, `fit`,
+`upscale`, `ladder`, …) is replaced by the sections above, and a spec states every field its kind needs: the SDK fills
+nothing in, and neither does the API. Every v1 spec has an exact v2 form; the table gives each v1 field's place, and
+the value v1 used when it was left out, which you now write.
+
+| v1 | v2 | v1 default, written out in v2 |
+|---|---|---|
+| `mode: 'single'` | `kind: 'video'`, `container.format: 'mp4'` | `single` |
+| `mode: 'hls'` | `kind: 'video'`, `container.format: 'hls'` | |
+| `segment_seconds` | `container.segment_seconds` | `4` |
+| `mode: 'audio'` | `kind: 'audio'` | |
+| `audio.container` | `container.format` (`mp4` read as `m4a`) | `auto` → `flac` for flac, `m4a` for alac, else `mp3` |
+| `mode: 'image'` | `kind: 'image'` | |
+| `codec` | `video.codec` | `av1` |
+| `quality.target` (a level) | `video.quality` | none set → `quality: 'standard'` |
+| `quality.crf` | `video.crf` (a level `target` is dropped: crf won) | |
+| `quality.target: 'cbr'` | `video.cbr` | |
+| `quality.bitrate` | `video.cbr.bitrate` | `'standard'` |
+| `quality.buffer_ms` | `video.cbr.buffer_ms` | `1000` |
+| `bit_depth` | `video.bit_depth` (`auto` → `from_color`) | `from_color` |
+| `color` | `video.color` | `sdr` |
+| `max_fps` | `video.frame_rate.max` | `'source'` |
+| `gop` | `video.gop.frames` | mp4: `{ seconds: 2 }`; hls: `'segment'` |
+| `filters: 'a,b'` | `video.filters: ['a', 'b']` | `[]` |
+| `renditions[]` | `renditions.sizes[]` | none and no ladder → `source_size`, with the top-level `fit` and `upscale` |
+| `renditions[].label` | `sizes[].label` | `'by_size'` |
+| `renditions[].fit` / `upscale` | `sizes[].fit` / `upscale` | the top-level `fit` / `upscale`, which default to `contain` / `false` |
+| `renditions[].orientation` | `sizes[].orientation` | `auto` |
+| `renditions[].bitrate` | `sizes[].video.cbr.bitrate` | |
+| `fit`, `upscale` (top level) | written onto every size, the ladder or the source size; dropped for audio | `contain`, `false` |
+| `ladder` | `renditions.ladder` (dropped when `renditions` is non-empty, as v1 ignored it) | `max_short_side` → `1080` |
+| `audio.mode: 'auto'` | `handling: 'auto'`, `codec: 'opus'` (`'mp3'` in an mp3 container) | |
+| `audio.mode: 'opus'` \| `'mp3'` \| `'aac'` \| `'flac'` \| `'alac'` | `handling: 'encode'`, `codec` | |
+| `audio.mode: 'drop'` | `handling: 'drop'` | |
+| `audio.bitrate` | `audio.bitrate` | `'standard'` (lossy) |
+| `audio.channels` | `audio.channels` | `source` |
+| `audio.he_aac` | `audio.he_aac` | `auto` |
+| `audio.stereo_fallback` | `audio.stereo_fallback` | `false` (hls) |
+| `audio.bit_depth` | `audio.bit_depth` | `source` (flac/alac) |
+| `audio.flac_compression` | `audio.flac_compression` (`default` → `balanced`) | `balanced` (flac) |
+| `subtitles: 'all' \| 'none'` | `subtitles.tracks` | `all` |
+| `subtitles: 'eng,deu'` | `subtitles.languages: ['eng', 'deu']` | |
+| `trim` | `trim` | `{ start: 0, end: 'source' }`; `end` unset → `'source'` |
+| `image.formats` | `image.formats` | `['avif']` |
+| `image.quality: 70` | `image.quality: { <each lossy format>: 70 }` | avif 60, webp 80, jpeg 82 |
+| `image.lossless` | `image.lossless` | `false` (webp) |
+| `image.keep_color_profile` | `image.color_profile: 'keep' \| 'srgb'` | `srgb` |
+| `image.frames` | `image.frames` | `'poster'` |
+| `privacy` | `privacy`, all four fields resolved | `{ preset: 'strip_all' }` |
+
+Fields v1 accepted where they did not apply (such as `fit` on audio-only output) have no v2 form: leave them out.
+
+Also changed:
+
+- A job gives a `preset` (with optional `output` overrides) or a whole `output`; neither is refused.
+- `Job.preset` records the preset version and the overrides; `Preset.version` is the latest version, and
+  `presets.versions` / `presets.getVersion` read the others. `Automation.resolved_output` is the spec its preset and
+  overrides resolve to now.
+- A 422 for a spec lists every failure in `TranscdrError.errors`; `param` and `message` are the first.
+- `capabilities.retrieve()` has `output`: the spec's fields, when each is required, and what each takes.
+- Error params name v2 paths (`output.video.codec`, `output.renditions.sizes.0.width`).
+- Removed: `OutputSpecInput`, `Rendition`, `Quality`, `QualityTarget`, `Mode`, `AudioMode`, `BitDepth`, and
+  `ImageSpec.keep_color_profile`. `FlacCompression` `'default'` is now `'balanced'`.
+
+**Older SDK releases keep working until the sunset.** The API still accepts v1 requests, with v1's defaults, and
+returns responses in the v1 shape to a client that asks for them with the `Transcdr-Output-Spec: v1` header (or
+`?output_spec=v1` on a `GET`). A 0.x client sends it through its `headers` option, so its `OutputSpec` reads jobs,
+presets and automations as before:
+
+```ts
+const transcdr = new Transcdr({ apiKey, headers: { 'Transcdr-Output-Spec': 'v1' } }); // @transcdr/sdk 0.x only
+```
+
+That compatibility mode is deprecated from the start: its responses carry `Deprecation: true` and a `Sunset` date,
+and it is removed after 31 March 2027. Move to 1.0 before then.
 
 ## Configuration
 
@@ -253,7 +439,7 @@ Every method also takes a trailing `RequestOptions` (`signal`, `timeoutMs`, `max
 | `assets` | `list`, `listAll`, `create` (link by URL), `retrieve`, `contentUrl`, `del` |
 | `jobs` | `create`, `list`, `listAll`, `retrieve`, `cancel`, `retry`, `del`, `events`, `outputs`, `outputUrl`, `fileUrl`, `waitFor`, `deliveries`, `deliver` |
 | `probe` | `create({ input, wait })` |
-| `presets` | `list` / `listAll` (filter by `category`, `compatible_with`), `create`, `retrieve` (id or slug), `update` (PATCH: `output` merges), `replace` (PUT: the whole preset), `del` |
+| `presets` | `list` / `listAll` (filter by `category`, `compatible_with`), `create`, `retrieve` (id or slug), `versions`, `getVersion`, `update` (PATCH: `output` merges, a new version), `replace` (PUT: the whole preset), `del` |
 | `webhooks` | `list`, `listAll`, `create` (HTTPS, SNS, SQS or through a connection), `retrieve`, `update`, `del`, `rotateSecret`, `test`, `check`, `checkSaved`, `deliveries`, `redeliver`, `verifySignature`, `verifySnsSqsSignature`, `constructEvent` |
 | `events` | `list`, `retrieve` |
 | `usage` | `retrieve({ from, to, granularity })`, `inputs({ from, to })` (inputs by duration, size and kind) |
@@ -332,16 +518,17 @@ Failed requests throw a subclass of `TranscdrError`, chosen by the API's `error.
 | `ConnectionError` / `TimeoutError` | — | no response |
 | `WaitTimeoutError` | — | `jobs.waitFor` gave up |
 
-Each carries `status`, `type`, `code`, `param` (dotted, e.g. `output.renditions.0.height`), `details` (per-field
-messages), `requestId` and `headers`.
+Each carries `status`, `type`, `code`, `param` (dotted, e.g. `output.renditions.sizes.0.height`), `details`
+(per-field messages), `errors` (a refused output spec: every failure, `{ param, message }`, in order), `requestId`
+and `headers`.
 
 ```ts
 import { InvalidRequestError, TranscdrError } from '@transcdr/sdk';
 
 try {
-  await transcdr.jobs.create({ input, output: { renditions: [{ width: 1281, height: 720 }] } });
+  await transcdr.jobs.create({ input, preset: 'web-av1-1080p', output: { renditions: { sizes: [{ label: 'x', width: 1281, height: 720, fit: 'contain', orientation: 'auto', upscale: false }] } } });
 } catch (err) {
-  if (err instanceof InvalidRequestError) console.error(err.param, err.message);
+  if (err instanceof InvalidRequestError) for (const e of err.errors) console.error(e.param, e.message);
   else if (err instanceof TranscdrError) console.error(err.status, err.code, err.requestId);
   else throw err;
 }
@@ -398,7 +585,7 @@ remembered, so after an error the key can be used again.
 Every preset has a `category` (`web`, `mobile`, `streaming`, `tv`, `social`, `audio`, `archive`), the group the
 dashboard shows it in, and `compatibility`: the platforms its output plays on (`web`, `ios`, `android`, `smart_tv`,
 `legacy`, `editing`), with a note for each giving minimum versions and conditions. Both are derived from the output
-spec. A platform is listed only when the codec, the container and the audio all play there; with `audio: 'auto'`, a
+spec. A platform is listed only when the codec, the container and the audio all play there; with `audio.handling: 'auto'`, a
 source whose audio is not AAC gets Opus, and the notes say which platforms need a newer version for that.
 
 ```ts
@@ -427,7 +614,7 @@ derived from `output` again); and the organization's `billing_email`.
 
 ```ts
 await transcdr.automations.update('aut_…', { destination: null, webhook_url: null });
-await transcdr.presets.replace('pre_…', { name: 'Web 1080p', output: { codec: 'av1' } }); // PUT: the whole preset
+await transcdr.presets.replace('pre_…', { name: 'Web 1080p', output: spec }); // PUT: the whole preset, a complete spec
 ```
 
 Connections and webhooks never return their secrets. `secrets` lists the ones that are set, each with a
@@ -587,7 +774,7 @@ for await (const entry of new Transcdr().changelog.list().autoPaginate()) consol
 
 ## Test mode
 
-Use a test key (`tdk_test_…`) while developing. Test jobs are validated like live ones but never touch a GPU: they
+Use a test key (`tdk_test_…`) while developing. Test jobs are validated like live ones but never transcode: they
 complete in a few seconds with synthetic outputs, are free, and are flagged `livemode: false`. Webhooks fire as usual.
 
 ## In the browser
@@ -622,8 +809,9 @@ if (!report.roles.destination) console.log(JSON.stringify(report.setup?.iam_poli
 
 ## Types
 
-Every API object is exported as a type: `Job`, `OutputSpec`, `OutputSpecInput`, `Rendition`, `Asset`, `Upload`,
-`Preset`, `WebhookEndpoint`, `WebhookDelivery`, `ConnectionCheck`, `WebhookCheck`, `Event`, `ApiKey`, `Organization`, `User`, `Membership`, `Usage`, `InputReport`, `Plan`, `Billing`,
+Every API object is exported as a type: `Job`, `OutputSpec` (`VideoOutput`, `AudioOutput`, `ImageOutput`, and each
+section: `Video`, `Audio`, `ImageSpec`, `VideoRenditions`, `Size`, `Privacy`, …), `OutputOverrides`,
+`PresetProvenance`, `PresetVersion`, `OutputCapabilities`, `Asset`, `Upload`, `Preset`, `WebhookEndpoint`, `WebhookDelivery`, `ConnectionCheck`, `WebhookCheck`, `Event`, `ApiKey`, `Organization`, `User`, `Membership`, `Usage`, `InputReport`, `Plan`, `Billing`,
 `CreditAccount`, `CreditTransaction`, `Statement`, `Announcement`, `ServiceCredit`, `MediaInfo`, `ListResponse<T>` and more, plus constants such as `JOB_STATUSES`, `EVENT_TYPES` and `SCOPES`.
 
 ## License
