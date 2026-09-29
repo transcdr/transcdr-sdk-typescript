@@ -14,6 +14,8 @@ interface Field {
   path: string;
   required: boolean;
   when: Condition;
+  /** Where it may also be given without being required (a privacy category beside a preset). */
+  allowed?: Condition;
   /** An object whose own fields are checked: not reported missing itself. */
   object?: boolean;
   group?: string;
@@ -90,10 +92,10 @@ const FIELDS: Field[] = [
   { path: 'trim.end', required: true, when: [[['kind', ['video']]]] },
   { path: 'privacy', required: true, when: [[]], object: true },
   { path: 'privacy.preset', required: false, when: [[]] },
-  { path: 'privacy.location', required: true, when: [[['privacy.preset', ['!']]]] },
-  { path: 'privacy.capture_time', required: true, when: [[['privacy.preset', ['!']]]] },
-  { path: 'privacy.device', required: true, when: [[['privacy.preset', ['!']]]] },
-  { path: 'privacy.descriptive', required: true, when: [[['privacy.preset', ['!']]]] },
+  { path: 'privacy.location', required: true, when: [[['privacy.preset', ['!']]]], allowed: [[]] },
+  { path: 'privacy.capture_time', required: true, when: [[['privacy.preset', ['!']]]], allowed: [[]] },
+  { path: 'privacy.device', required: true, when: [[['privacy.preset', ['!']]]], allowed: [[]] },
+  { path: 'privacy.descriptive', required: true, when: [[['privacy.preset', ['!']]]], allowed: [[]] },
 ];
 
 /** The exclusive groups. */
@@ -207,11 +209,12 @@ export function validateOutput(spec: OutputSpec | unknown): FieldError[] {
   const refused: string[] = [];
   for (const field of FIELDS) {
     if (privacyMissing && field.path.startsWith('privacy')) continue;
-    const applies = holds(document, field.when);
+    const requiredHere = holds(document, field.when);
+    const applies = requiredHere || (field.allowed !== undefined && holds(document, field.allowed));
     for (const [path, value] of instances(document, field.path)) {
       if (refused.some((r) => path.startsWith(`${r}.`))) continue;
       if (value === undefined) {
-        if (applies && field.required && !field.object) {
+        if (requiredHere && field.required && !field.object) {
           errors.push(failure(path, `output.${path} is required when ${describe(field.when)}.`));
         }
       } else if (!applies) {

@@ -302,19 +302,21 @@ export interface PrivacyFields {
   preset?: never;
 }
 
+/** A preset, with any of the categories refining it. */
+export interface PrivacyFromPreset {
+  preset: PrivacyPreset;
+  location?: LocationHandling;
+  capture_time?: CaptureTimeHandling;
+  device?: DeviceHandling;
+  descriptive?: DescriptiveHandling;
+}
+
 /**
- * Which identifying metadata survives: a `preset` alone, or all four categories. `strip_all` keeps nothing,
- * `strip_location` keeps all but location, `keep_all` keeps everything. HLS keeps nothing.
+ * Which identifying metadata survives: a `preset` (`strip_all` keeps nothing, `strip_location` keeps all but
+ * location, `keep_all` keeps everything) with any categories given refining it, or all four categories without a
+ * preset. HLS keeps nothing.
  */
-export type Privacy =
-  | {
-      preset: PrivacyPreset;
-      location?: never;
-      capture_time?: never;
-      device?: never;
-      descriptive?: never;
-    }
-  | PrivacyFields;
+export type Privacy = PrivacyFromPreset | PrivacyFields;
 
 /** Video: an MP4 per size, or an HLS package. */
 export interface VideoOutput {
@@ -377,9 +379,11 @@ export type OutputOverrides = Override<OutputSpec>;
 
 /** Where a job's spec came from: the preset version and the request's overrides over it. */
 export interface PresetProvenance {
-  /** The preset as the request named it: a slug, `slug@N`, or a `pre_…` id. */
+  /** The preset's id. */
   id: string;
-  version: number | null;
+  slug: string;
+  /** The version the job was resolved from. */
+  version: number;
   /** The request's `output` over the preset, in v2; `null` for none. */
   overrides: OutputOverrides | null;
 }
@@ -1615,62 +1619,6 @@ export interface Stats {
 }
 
 // ---------------------------------------------------------------------------
-// Platform operator console (`/v1/admin`, session tokens of operators only)
-// ---------------------------------------------------------------------------
-
-export interface AdminPoolStatus {
-  driver: string;
-  pool: string;
-  nodes_total: number;
-  nodes_ready: number;
-  gpus_allocatable: number;
-  pending_pods: number;
-}
-
-export interface AdminOverview {
-  object: 'admin_overview';
-  organizations: number;
-  /** Live jobs only. */
-  jobs_by_status: Record<JobStatus, number>;
-  gpu_pool: AdminPoolStatus | null;
-}
-
-/** Infrastructure details the operator console sees for a job. Never exposed to customers. */
-export interface AdminJobInternals {
-  node: string | null;
-  pod: string | null;
-  gpus: string[];
-  encoder: string | null;
-  dispatch_ref: string | null;
-  heartbeat_at: Timestamp | null;
-  /** The unredacted error, before it is mapped to a customer-safe message. */
-  raw_error: JobError | null;
-}
-
-/** A job as the operator console sees it: with its organization and internals. */
-export interface AdminJob extends Job {
-  organization: string | number;
-  internals: AdminJobInternals | null;
-}
-
-export interface AdminOrganizationUpdateParams {
-  plan?: PlanId;
-  suspended?: boolean;
-}
-
-export interface AdminAnnouncementCreateParams {
-  title: string;
-  /** Markdown. */
-  body: string;
-  link?: AnnouncementLink | null;
-  tags?: string[];
-  /** Defaults to now; `null` saves a draft; a future time schedules it. */
-  published_at?: Timestamp | null;
-}
-
-export type AdminAnnouncementUpdateParams = Partial<AdminAnnouncementCreateParams>;
-
-// ---------------------------------------------------------------------------
 // Announcements: the changelog and service-credit notices
 // ---------------------------------------------------------------------------
 
@@ -1702,7 +1650,7 @@ export interface Announcement {
   title: string;
   /** Markdown. */
   body: string;
-  /** `null` for a draft (operator console only). */
+  /** `null` for a draft. */
   published_at: Timestamp | null;
   link: AnnouncementLink | null;
   /** Changelog entries only; may be empty. */

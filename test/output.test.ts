@@ -47,8 +47,9 @@ describe('the types', () => {
     const noFrameRate: VideoOutput = { ...singleMp4, video: { codec: 'h264', quality: 'high', bit_depth: 'from_color', color: 'sdr', gop: { seconds: 2 }, filters: [] } };
     // @ts-expect-error quality and crf are one choice
     const twoRates: VideoOutput = { ...singleMp4, video: { ...singleMp4.video, crf: 23 } };
-    // @ts-expect-error privacy is a preset or all four fields, not both
-    const mixedPrivacy: OutputSpec = { ...audioMp3, privacy: { preset: 'strip_all', location: 'keep' } };
+    // @ts-expect-error without a preset, privacy needs all four categories
+    const partialPrivacy: OutputSpec = { ...audioMp3, privacy: { location: 'keep' } };
+    const refinedPrivacy: OutputSpec = { ...audioMp3, privacy: { preset: 'strip_all', location: 'approximate' } };
     // @ts-expect-error a lossy codec needs a bitrate
     const noBitrate: OutputSpec = { ...audioMp3, audio: { handling: 'encode', codec: 'aac', channels: 'stereo', he_aac: 'auto' } };
     // @ts-expect-error audio output has no video section
@@ -56,7 +57,7 @@ describe('the types', () => {
     // @ts-expect-error an image has no ladder
     const imageLadder: OutputSpec = { ...stills, renditions: { ladder: { max_short_side: 1080, fit: 'contain', upscale: false } } };
     const overrides: OutputOverrides = { video: { frame_rate: { max: 24 } }, container: { format: 'mp4', segment_seconds: null } };
-    expect([noFrameRate, twoRates, mixedPrivacy, noBitrate, audioWithVideo, imageLadder, overrides]).toHaveLength(7);
+    expect([noFrameRate, twoRates, partialPrivacy, refinedPrivacy, noBitrate, audioWithVideo, imageLadder, overrides]).toHaveLength(8);
   });
 });
 

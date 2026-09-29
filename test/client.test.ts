@@ -110,12 +110,13 @@ describe('requests', () => {
       json({
         ...job('job_1'),
         preset_id: 'social-vertical-1080x1920',
-        preset: { id: 'social-vertical-1080x1920', version: 1, overrides: { video: { frame_rate: { max: 24 } } } },
+        preset: { id: 'social-vertical-1080x1920', slug: 'social-vertical-1080x1920', version: 1, overrides: { video: { frame_rate: { max: 24 } } } },
         output: { ...singleMp4, privacy: { location: 'strip', capture_time: 'strip', device: 'strip', descriptive: 'strip' } },
         input_info: { width: 720, height: 576, display_width: 1024, display_height: 576 },
       }),
     );
     const got = await client(fetch).jobs.retrieve('job_1');
+    expect(got.preset?.slug).toBe('social-vertical-1080x1920');
     expect(got.preset?.version).toBe(1);
     expect(got.preset?.overrides).toEqual({ video: { frame_rate: { max: 24 } } });
     expect(got.output.kind).toBe('video');
@@ -480,27 +481,6 @@ describe('announcements', () => {
       'http://api.test/v1/changelog?limit=1&cursor=ann_1',
     ]);
     expect(calls[0].headers.authorization).toBeUndefined();
-  });
-
-  it('lets operators write changelog entries and drafts', async () => {
-    const draft = { ...credit, id: 'ann_d', kind: 'changelog', credit: null, published_at: null };
-    const { fetch, calls } = mockFetch(
-      json(list([draft], null)),
-      json(draft),
-      json({ ...draft, published_at: '2026-09-27T10:00:00Z' }),
-      json(undefined, 204),
-    );
-    const t = client(fetch);
-    expect((await t.admin.announcements.list({ limit: 100 })).data[0].published_at).toBeNull();
-    await t.admin.announcements.create({ title: 'New', body: '**Hi**', tags: ['api'], link: { label: 'Docs', url: '/docs' }, published_at: null });
-    await t.admin.announcements.update('ann_d', { published_at: '2026-09-27T10:00:00Z' });
-    await t.admin.announcements.del('ann_d');
-    expect(calls.map((c) => [c.method, c.url, c.body])).toEqual([
-      ['GET', 'http://api.test/v1/admin/announcements?limit=100', undefined],
-      ['POST', 'http://api.test/v1/admin/announcements', { title: 'New', body: '**Hi**', tags: ['api'], link: { label: 'Docs', url: '/docs' }, published_at: null }],
-      ['PATCH', 'http://api.test/v1/admin/announcements/ann_d', { published_at: '2026-09-27T10:00:00Z' }],
-      ['DELETE', 'http://api.test/v1/admin/announcements/ann_d', undefined],
-    ]);
   });
 });
 

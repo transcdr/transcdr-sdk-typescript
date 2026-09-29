@@ -9,7 +9,7 @@ Output spec v2. This is a breaking release: the output spec is declared in secti
 - `OutputSpec` is `VideoOutput | AudioOutput | ImageOutput`, discriminated on `kind`, with a type for each section
   (`VideoContainer`, `Video`, `Audio`, `ImageSpec`, `VideoRenditions`, `ImageRenditions`, `Subtitles`, `Trim`,
   `Privacy`). Every field a kind always needs is required; each exclusive choice (`quality` / `crf` / `cbr`,
-  `sizes` / `ladder` / `source_size`, `tracks` / `languages`, a privacy preset or its four categories, the forms of
+  `sizes` / `ladder` / `source_size`, `tracks` / `languages`, a privacy preset (refined by any categories given) or all four categories, the forms of
   `gop` and `image.frames`) is a union.
 - `validateOutput(spec)`: the API's table of required fields, run locally. It returns every missing field, every
   field given where it does not apply, and every group without exactly one choice, with the API's `param` and
@@ -17,7 +17,7 @@ Output spec v2. This is a breaking release: the output spec is declared in secti
   `InvalidRequestError` (code `validation_failed`) before sending anything. `assertOutput(spec)` throws the same.
 - `OutputOverrides`: the partial sent with a preset (any field optional, `null` removes one).
 - `TranscdrError.errors`: every failure of a 422, `{ param, message }`, in order (empty for other errors).
-- `Job.preset`: `{ id, version, overrides }`, the preset version and overrides a job's spec was resolved from.
+- `Job.preset`: `{ id, slug, version, overrides }`, the preset version and overrides a job's spec was resolved from.
 - `Preset.version`, `presets.versions(id)` and `presets.getVersion(id, n)`. `preset` accepts `slug@N`.
 - `Automation.resolved_output`: the spec an automation's preset and overrides resolve to now.
 - `Capabilities.output` (`OutputCapabilities`): the spec's fields, when each is required, and what each takes.
@@ -36,6 +36,9 @@ Output spec v2. This is a breaking release: the output spec is declared in secti
 
 - `OutputSpecInput`, `Rendition` (now `Size`), `Quality`, `QualityTarget`, `Mode`, `AudioMode`, `BitDepth` (now
   `VideoBitDepth`) and `ImageSpec.keep_color_profile` (now `color_profile`).
+- The operator console (`transcdr.admin` and its types: `Admin`, `AdminOverview`, `AdminPoolStatus`, `AdminJob`,
+  `AdminJobInternals`, `AdminOrganizationUpdateParams`, `AdminAnnouncementCreateParams`,
+  `AdminAnnouncementUpdateParams`). It is not part of the public API.
 
 ### Migrating from v1
 

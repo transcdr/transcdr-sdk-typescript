@@ -1,5 +1,4 @@
 import { Core, type ClientOptions, type RequestOptions } from './core';
-import { Admin } from './resources/admin';
 import { Announcements, Changelog } from './resources/announcements';
 import { ApiKeys } from './resources/apiKeys';
 import { Assets } from './resources/assets';
@@ -56,8 +55,6 @@ export class Transcdr {
   readonly announcements: Announcements;
   /** Public. */
   readonly changelog: Changelog;
-  /** Platform operators only. */
-  readonly admin: Admin;
 
   constructor(options: ClientOptions = {}) {
     this.core = new Core(options);
@@ -83,7 +80,6 @@ export class Transcdr {
     this.deliveries = new Deliveries(this.core);
     this.announcements = new Announcements(this.core);
     this.changelog = new Changelog(this.core);
-    this.admin = new Admin(this.core);
   }
 
   /** The API base URL in use. */

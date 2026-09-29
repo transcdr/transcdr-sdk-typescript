@@ -87,11 +87,11 @@ follow the source, you write that as a value: `'source'`, `'standard'`, `'from_c
 | `renditions` | One of `sizes`, `ladder` (video) or `source_size` | video, image |
 | `subtitles` | `{ tracks: 'all' \| 'none' }` or `{ languages: ['eng'] }` | video |
 | `trim` | `{ start, end }`, `end` in seconds or `'source'` | video |
-| `privacy` | `{ preset }`, or all of `location`, `capture_time`, `device`, `descriptive` | all |
+| `privacy` | a `preset` (categories given refine it), or all of `location`, `capture_time`, `device`, `descriptive` | all |
 
 `OutputSpec` is `VideoOutput | AudioOutput | ImageOutput`, and every field a kind always needs is required in its type.
-Exclusive choices are unions, so giving both `quality` and `crf`, or a `preset` beside privacy fields, does not
-type-check. A field whose need depends on another (an audio `bitrate` for a lossy codec, `stereo_fallback` in HLS,
+Exclusive choices are unions, so giving both `quality` and `crf`, or privacy categories without a preset and
+without all four, does not type-check. A field whose need depends on another (an audio `bitrate` for a lossy codec, `stereo_fallback` in HLS,
 `image.quality` for a lossy format, a lossless codec's `bit_depth`) is optional in the type and checked at runtime.
 
 ### Values that follow the source
@@ -288,8 +288,8 @@ console.log(done.billing?.billable_images, done.billing?.tier);
 
 ### Privacy
 
-`privacy` says which identifying metadata survives: a `preset` alone (`'strip_all'`, `'strip_location'`,
-`'keep_all'`), or all four categories: `location` (`'strip'`, `'approximate'`, `'keep'`), `capture_time` (`'strip'`,
+`privacy` says which identifying metadata survives: a `preset` (`'strip_all'`, `'strip_location'`, `'keep_all'`),
+with any categories given refining it, or all four categories without a preset: `location` (`'strip'`, `'approximate'`, `'keep'`), `capture_time` (`'strip'`,
 `'date'`, `'keep'`), `device` (`'strip'`, `'keep'`, `'keep_all'`) and `descriptive` (`'strip'`, `'keep'`). Responses
 always show the four categories. HLS keeps nothing.
 
@@ -317,7 +317,7 @@ const job = await transcdr.jobs.create({
   preset: 'social-vertical-1080x1920@1',
   output: { video: { frame_rate: { max: 24 } } },
 });
-job.preset; // { id: 'social-vertical-1080x1920@1', version: 1, overrides: { video: { frame_rate: { max: 24 } } } }
+job.preset; // { id: 'social-vertical-1080x1920', slug: 'social-vertical-1080x1920', version: 1, overrides: { video: { frame_rate: { max: 24 } } } }
 job.output; // the resolved, complete spec: what runs
 
 await transcdr.jobs.create({ input, preset: 'hls-h264-abr', output: { container: { format: 'mp4', segment_seconds: null }, video: { gop: { seconds: 2 } }, audio: { stereo_fallback: null } } });
@@ -327,7 +327,7 @@ const v1 = await transcdr.presets.getVersion('pre_…', 1); // the preset as it 
 await transcdr.presets.update('pre_…', { output: { video: { crf: 28 } } }); // a new version
 ```
 
-A job's `output` is always the resolved spec, and `preset` is `{ id, version, overrides }`, or `null` for a job given
+A job's `output` is always the resolved spec, and `preset` is `{ id, slug, version, overrides }`, or `null` for a job given
 its whole spec. An automation's `output` is its overrides, and `resolved_output` the spec they resolve to now.
 
 ## Migrating from v1
@@ -453,7 +453,6 @@ Every method also takes a trailing `RequestOptions` (`signal`, `timeoutMs`, `max
 | `stats` | `get`: public platform totals, last 24 h and 30 daily points |
 | `announcements` | `list({ unseen, kind, limit })`, `markSeen(ids)`, `markAllSeen()` |
 | `changelog` | `list`: public, published changelog entries |
-| `admin` | platform operators only: `overview`, `jobs`, `organizations`, `updateOrganization`, `announcements.list`, `announcements.create`, `announcements.update`, `announcements.del` |
 
 For anything newer than the SDK, `transcdr.request(method, path, options)` calls an endpoint directly.
 
