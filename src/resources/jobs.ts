@@ -1,5 +1,6 @@
 import type { RequestOptions } from '../core';
-import { WaitTimeoutError } from '../errors';
+import { InvalidRequestError, WaitTimeoutError } from '../errors';
+import { assertOutput } from '../output';
 import type { PagePromise } from '../pagination';
 import {
   isTerminalStatus,
@@ -32,10 +33,24 @@ export class Jobs extends Resource {
    *
    * `maxCostCents` (or `max_cost_cents`) caps what the job may cost: it is
    * refused with `cost_limit_exceeded` rather than run over the cap.
+   *
+   * Name a `preset` (with optional `output` overrides), or give the whole `output`. A whole spec is checked before
+   * it is sent: an incomplete one throws an `InvalidRequestError` whose `errors` lists every missing field.
    */
-  create(params: JobCreateParams & { maxCostCents?: number }, options: RequestOptions = {}): Promise<Job> {
+  async create(params: JobCreateParams & { maxCostCents?: number }, options: RequestOptions = {}): Promise<Job> {
     const { maxCostCents, ...rest } = params;
-    const body: JobCreateParams = maxCostCents === undefined ? rest : { ...rest, max_cost_cents: maxCostCents };
+    if (rest.preset == null) {
+      if (rest.output == null) {
+        throw new InvalidRequestError('Give a preset, or the whole output spec.', {
+          type: 'invalid_request_error',
+          code: 'validation_failed',
+          param: 'output',
+          errors: [{ param: 'output', message: 'Give a preset, or the whole output spec.' }],
+        });
+      }
+      assertOutput(rest.output);
+    }
+    const body = maxCostCents === undefined ? rest : { ...rest, max_cost_cents: maxCostCents };
     return this.core.create('/v1/jobs', body, options);
   }
 

@@ -15,7 +15,16 @@ export interface ErrorBody {
   message: string;
   param?: string | null;
   details?: Record<string, string[]> | null;
+  /** An output spec refused: every failure, in order (missing fields first); the first is `param` and `message`. */
+  errors?: FieldError[];
   request_id?: string | null;
+}
+
+/** One failure of an output spec, at its dotted path. */
+export interface FieldError {
+  /** E.g. `output.audio.bitrate` or `output.renditions.sizes.0.fit`. */
+  param: string;
+  message: string;
 }
 
 export interface TranscdrErrorInit {
@@ -24,6 +33,7 @@ export interface TranscdrErrorInit {
   code?: string | null;
   param?: string | null;
   details?: Record<string, string[]> | null;
+  errors?: FieldError[];
   requestId?: string | null;
   headers?: Headers;
   cause?: unknown;
@@ -37,10 +47,12 @@ export class TranscdrError extends Error {
   readonly status: number;
   /** Machine-readable code, e.g. `validation_failed` or `insufficient_scope`. */
   readonly code: string | null;
-  /** The offending parameter in dotted form, e.g. `output.renditions.0.width`. */
+  /** The offending parameter in dotted form, e.g. `output.renditions.sizes.0.width`. */
   readonly param: string | null;
   /** Per-field validation messages. */
   readonly details: Record<string, string[]> | null;
+  /** A refused output spec: every failure, in order (missing fields first). Empty otherwise. */
+  readonly errors: FieldError[];
   /** The `X-Request-Id` of the failed request, for support. */
   readonly requestId: string | null;
   readonly headers: Headers | null;
@@ -53,6 +65,7 @@ export class TranscdrError extends Error {
     this.code = init.code ?? null;
     this.param = init.param ?? null;
     this.details = init.details ?? null;
+    this.errors = init.errors ?? [];
     this.requestId = init.requestId ?? null;
     this.headers = init.headers ?? null;
     if (init.cause !== undefined) {
@@ -140,6 +153,7 @@ export function errorFromResponse(status: number, body: unknown, headers: Header
     code: envelope?.code ?? null,
     param: envelope?.param ?? null,
     details: envelope?.details ?? null,
+    errors: Array.isArray(envelope?.errors) ? envelope.errors : [],
     requestId: envelope?.request_id ?? headers.get('x-request-id'),
     headers,
   });

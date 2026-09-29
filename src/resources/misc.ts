@@ -23,6 +23,7 @@ import type {
   PresetListParams,
   PresetReplaceParams,
   PresetUpdateParams,
+  PresetVersion,
   ProbeParams,
   Statement,
   Stats,
@@ -30,6 +31,7 @@ import type {
   Usage,
   UsageParams,
 } from '../types';
+import { assertOutput } from '../output';
 import { Resource, seg } from './base';
 
 export class Probe extends Resource {
@@ -68,28 +70,41 @@ export class Presets extends Resource {
     return this.list(params).toArray(max);
   }
 
-  create(params: PresetCreateParams, options?: RequestOptions): Promise<Preset> {
+  /** Save a complete spec as version 1. The spec is checked before it is sent (see `validateOutput`). */
+  async create(params: PresetCreateParams, options?: RequestOptions): Promise<Preset> {
+    assertOutput(params.output);
     return this.core.create('/v1/presets', params, options);
   }
 
-  /** By `pre_…` id or by slug (system or custom). */
+  /** By `pre_…` id or by slug (system or custom): its latest version. */
   retrieve(idOrSlug: string, options?: RequestOptions): Promise<Preset> {
     return this.core.request('GET', `/v1/presets/${seg(idOrSlug)}`, options);
   }
 
+  /** Every version of a preset, oldest first: each a complete spec that never changes. */
+  versions(idOrSlug: string, options?: RequestOptions): Promise<ListResponse<PresetVersion>> {
+    return this.core.collection(`/v1/presets/${seg(idOrSlug)}/versions`, options);
+  }
+
+  /** A preset as it was at `version` (`GET /v1/presets/{id}@N`): `version` and `output` are that version's. */
+  getVersion(idOrSlug: string, version: number, options?: RequestOptions): Promise<Preset> {
+    return this.core.request('GET', `/v1/presets/${seg(idOrSlug)}@${version}`, options);
+  }
+
   /**
-   * Change the fields sent (`PATCH`). `output` merges into the stored spec; `null` clears
-   * `description` or `metadata`.
+   * Change the fields sent (`PATCH`). `output` merges over the latest version, and a changed spec is a new
+   * version; `null` clears `description` or `metadata`.
    */
   update(id: string, params: PresetUpdateParams, options?: RequestOptions): Promise<Preset> {
     return this.core.request('PATCH', `/v1/presets/${seg(id)}`, { ...options, body: params });
   }
 
   /**
-   * Replace the preset (`PUT`): `output` is the whole spec (a field left out takes its default, as on
-   * create), `description` and `metadata` left out are emptied, and `slug` left out is kept.
+   * Replace the preset (`PUT`): `output` is the whole spec, complete (checked before it is sent), and a changed
+   * spec is a new version; `description` and `metadata` left out are emptied, and `slug` left out is kept.
    */
-  replace(id: string, params: PresetReplaceParams, options?: RequestOptions): Promise<Preset> {
+  async replace(id: string, params: PresetReplaceParams, options?: RequestOptions): Promise<Preset> {
+    assertOutput(params.output);
     return this.core.request('PUT', `/v1/presets/${seg(id)}`, { ...options, body: params });
   }
 
