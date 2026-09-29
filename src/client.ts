@@ -18,6 +18,7 @@ import {
   UsageResource,
 } from './resources/misc';
 import { OrganizationResource, Organizations } from './resources/organization';
+import { Support } from './resources/support';
 import { Uploads } from './resources/uploads';
 import { Webhooks } from './resources/webhooks';
 
@@ -54,6 +55,8 @@ export class Transcdr {
   readonly automations: Automations;
   readonly deliveries: Deliveries;
   readonly announcements: Announcements;
+  /** Support tickets and ticket email preferences. */
+  readonly support: Support;
   /** Public. */
   readonly changelog: Changelog;
   /** Platform operators only. */
@@ -82,6 +85,7 @@ export class Transcdr {
     this.automations = new Automations(this.core);
     this.deliveries = new Deliveries(this.core);
     this.announcements = new Announcements(this.core);
+    this.support = new Support(this.core);
     this.changelog = new Changelog(this.core);
     this.admin = new Admin(this.core);
   }
