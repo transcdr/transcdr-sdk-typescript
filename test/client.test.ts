@@ -14,7 +14,10 @@ import {
   AUDIO_CHANNELS,
   FITS,
   HE_AAC,
+  IMAGE_FORMATS,
+  IMAGE_TIERS,
   ORIENTATIONS,
+  PRESET_CATEGORIES,
   type Audio,
   type OutputSpecInput,
 } from '../src';
@@ -149,6 +152,60 @@ describe('requests', () => {
     expect(got.output.upscale).toBe(false);
     expect(got.output.renditions[0].fit).toBe('cover');
     expect(got.input_info?.display_width).toBe(1024);
+  });
+
+  it('sends an image output as written', async () => {
+    const output: OutputSpecInput = {
+      mode: 'image',
+      renditions: [{ width: 1920, height: 1920 }, { width: 641, height: 17, label: 'small' }],
+      image: {
+        formats: ['avif', 'jpeg'],
+        quality: 70,
+        lossless: false,
+        keep_color_profile: true,
+        frames: { at_seconds: [1.5, 10] },
+      },
+    };
+    const { fetch, calls } = mockFetch(json(job('job_1')));
+    await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, output });
+    expect((calls[0].body as { output: unknown }).output).toEqual({
+      mode: 'image',
+      renditions: [{ width: 1920, height: 1920 }, { width: 641, height: 17, label: 'small' }],
+      image: {
+        formats: ['avif', 'jpeg'],
+        quality: 70,
+        lossless: false,
+        keep_color_profile: true,
+        frames: { at_seconds: [1.5, 10] },
+      },
+    });
+    expect(IMAGE_FORMATS).toEqual(['avif', 'webp', 'jpeg', 'png']);
+    expect(IMAGE_TIERS).toEqual(['up_to_1mp', 'up_to_4mp', 'over_4mp']);
+    expect(PRESET_CATEGORIES).toContain('image');
+  });
+
+  it('reads image outputs and their billing back from a job', async () => {
+    const { fetch } = mockFetch(
+      json({
+        ...job('job_1', 'completed'),
+        output: { mode: 'image', renditions: [{ width: 1920, height: 1920 }], image: { formats: ['avif', 'jpeg'], frames: { count: 2 } } },
+        outputs: [
+          { label: '1920x1080-001.avif', width: 1920, height: 1080, frames: 1, bytes: 120_000, content_type: 'image/avif', path: '1920x1080-001.avif', url: 'https://x/1', format: 'avif', rendition: '1920x1080', frame: 1, at_seconds: 3.3 },
+          { label: '1920x1080-002.jpg', width: 1920, height: 1080, frames: 1, bytes: 310_000, content_type: 'image/jpeg', path: '1920x1080-002.jpg', url: 'https://x/2', format: 'jpeg', rendition: '1920x1080', frame: 2, at_seconds: 6.6 },
+        ],
+        billing: { billable_minutes: 0, billable_images: 2, amount_cents: 1, amount_usd: 0.004, tier: 'up_to_4mp' },
+      }),
+    );
+    const got = await client(fetch).jobs.retrieve('job_1');
+    expect(got.output.mode).toBe('image');
+    expect(got.output.image?.formats).toEqual(['avif', 'jpeg']);
+    expect(got.output.image?.frames?.count).toBe(2);
+    expect(got.outputs[1].format).toBe('jpeg');
+    expect(got.outputs[1].rendition).toBe('1920x1080');
+    expect(got.outputs[1].frame).toBe(2);
+    expect(got.outputs[1].at_seconds).toBe(6.6);
+    expect(got.billing?.billable_images).toBe(2);
+    expect(got.billing?.tier).toBe('up_to_4mp');
   });
 
   it('generates an Idempotency-Key for jobs.create and uploads.create', async () => {

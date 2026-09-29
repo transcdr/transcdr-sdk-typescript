@@ -38,10 +38,14 @@ export interface ListParams {
 // ---------------------------------------------------------------------------
 
 /**
- * `single` (one MP4), `hls` (an adaptive ladder) or `audio` (the audio alone as one file: an `.mp3`, `.flac` or
- * `.m4a`, see `Audio.container`).
+ * `single` (one MP4), `hls` (an adaptive ladder), `audio` (the audio alone as one file: an `.mp3`, `.flac` or
+ * `.m4a`, see `Audio.container`) or `image` (still images of an image or a video, see `OutputSpec.image`).
  */
-export type Mode = 'single' | 'hls' | 'audio';
+export type Mode = 'single' | 'hls' | 'audio' | 'image';
+/** An image output format: `avif` (the default, the smallest), `webp`, `jpeg` or `png` (always lossless). */
+export type ImageFormat = 'avif' | 'webp' | 'jpeg' | 'png';
+/** Every image output format, in display order. */
+export const IMAGE_FORMATS = ['avif', 'webp', 'jpeg', 'png'] as const;
 export type Codec = 'av1' | 'h264' | 'h265';
 /**
  * `auto` passes compatible audio through and transcodes the rest (to Opus, or to MP3 in an audio-only `.mp3`).
@@ -106,9 +110,9 @@ export type QualityTarget = 'visually_lossless' | 'high' | 'standard' | 'low' | 
  * came out at.
  */
 export interface Rendition {
-  /** Maximum width; even, 64–7680. */
+  /** Maximum width; even, 64–7680. Mode `image`: 16–8192, odd sizes allowed. */
   width: number;
-  /** Maximum height; even, 64–4320. */
+  /** Maximum height; even, 64–4320. Mode `image`: 16–8192, odd sizes allowed. */
   height: number;
   /**
    * This rendition's constant bitrate, such as `"3M"` or `"800k"` (100k–200M), when
@@ -163,6 +167,31 @@ export interface Audio {
   he_aac?: HeAac;
 }
 
+/**
+ * A video input's stills in an image job: at these times, or this many evenly spaced. Give one or the other; neither
+ * is one frame 10% of the way in. An image input refuses `frames`.
+ */
+export interface ImageFrames {
+  /** Seconds from the start, 1–100 of them, each within the video. */
+  at_seconds?: number[];
+  /** 1–100 stills, evenly spaced through the video. */
+  count?: number;
+}
+
+/** Mode `image` only: every rendition is made in every format. */
+export interface ImageSpec {
+  /** 1–4 distinct formats; `['avif']` when left out. */
+  formats?: ImageFormat[];
+  /** 1–100, for the lossy formats. Left out, each format's own default (AVIF 60, WebP 80, JPEG 82). */
+  quality?: number;
+  /** Lossless WebP. Only with `webp` and `png` (PNG is always lossless). */
+  lossless?: boolean;
+  /** Keep the source's colour profile instead of converting to sRGB. EXIF, XMP and GPS are never kept. */
+  keep_color_profile?: boolean;
+  /** A video input's stills. */
+  frames?: ImageFrames;
+}
+
 export interface Trim {
   start?: number;
   end?: number | null;
@@ -188,6 +217,8 @@ export interface OutputSpec {
   max_fps: number | null;
   filters: string | null;
   trim: Trim | null;
+  /** Mode `image` only; absent otherwise. */
+  image?: ImageSpec | null;
 }
 
 /** A partial spec, as sent on job creation (merged over the preset). */
@@ -210,6 +241,8 @@ export interface OutputSpecInput {
   max_fps?: number | null;
   filters?: string | null;
   trim?: Trim | null;
+  /** Mode `image` only: the formats, quality and, for a video input, which stills. */
+  image?: ImageSpec | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -259,6 +292,10 @@ export type Stage = 'waiting' | 'fetching' | 'probing' | 'encoding' | 'uploading
 export type RenditionStatus = 'pending' | 'running' | 'finalizing' | 'completed' | 'failed';
 export type Priority = 'normal' | 'high';
 export type Tier = 'sd' | 'hd' | 'uhd';
+/** An output image's price tier, by the pixels it came out at. */
+export type ImageTier = 'up_to_1mp' | 'up_to_4mp' | 'over_4mp';
+/** Every image tier, smallest first. */
+export const IMAGE_TIERS = ['up_to_1mp', 'up_to_4mp', 'over_4mp'] as const;
 
 export const JOB_STATUSES: readonly JobStatus[] = [
   'queued',
@@ -320,6 +357,14 @@ export interface JobOutput {
   /** Relative to the job's output root, e.g. `1080p.mp4`. */
   path: string;
   url: string;
+  /** Image output: the file's format. */
+  format?: ImageFormat;
+  /** Image output: the rendition it was made for (its label, or the size it came out at). */
+  rendition?: string;
+  /** Image output of a video with several stills: which still, from 1. */
+  frame?: number;
+  /** Image output of a video: the still's time, in seconds. */
+  at_seconds?: number;
 }
 
 export interface JobError {
@@ -331,12 +376,14 @@ export interface JobError {
 
 export interface JobBilling {
   billable_minutes: number;
+  /** Image output: the images billed (an image job bills no minutes). */
+  billable_images?: number;
   /** Rounded up to the cent. */
   amount_cents: number;
   /** Exact, in dollars (sub-cent). */
   amount_usd?: number;
-  /** Null until the job has produced output. */
-  tier: Tier | null;
+  /** Null until the job has produced output. An image job's is an `ImageTier`. */
+  tier: Tier | ImageTier | null;
   /** Seconds of output, once known. */
   output_duration?: number | null;
 }
@@ -472,12 +519,21 @@ export interface UploadCreateParams {
 /**
  * The group a preset is shown in: `web` (a single MP4 for browsers), `mobile` (native iOS and Android),
  * `streaming` (adaptive HLS), `tv` (smart TVs, set-top boxes, constant bit rate), `social` (portrait),
- * `audio` (audio-only) and `archive` (visually lossless, HDR). More may be added.
+ * `audio` (audio-only), `archive` (visually lossless, HDR) and `image` (still images). More may be added.
  */
-export type PresetCategory = 'web' | 'mobile' | 'streaming' | 'tv' | 'social' | 'audio' | 'archive' | (string & {});
+export type PresetCategory =
+  | 'web'
+  | 'mobile'
+  | 'streaming'
+  | 'tv'
+  | 'social'
+  | 'audio'
+  | 'archive'
+  | 'image'
+  | (string & {});
 
 /** Every category, in display order. */
-export const PRESET_CATEGORIES = ['web', 'mobile', 'streaming', 'tv', 'social', 'audio', 'archive'] as const;
+export const PRESET_CATEGORIES = ['web', 'mobile', 'streaming', 'tv', 'social', 'audio', 'archive', 'image'] as const;
 
 /**
  * Where an output plays: `web` (current Chrome, Edge, Firefox, Safari), `ios`, `android`, `smart_tv`,
@@ -986,6 +1042,7 @@ export interface UsagePoint {
   date: string;
   jobs: number;
   billable_minutes: number;
+  billable_images?: number;
   /** Rounded up to the cent. */
   amount_cents: number;
   /** Exact, in dollars (sub-cent). */
@@ -1000,12 +1057,17 @@ export interface Usage {
   totals: {
     jobs: number;
     billable_minutes: number;
+    /** Output images billed. */
+    billable_images?: number;
     input_minutes: number;
     output_bytes: number;
     amount_cents: number;
     amount_usd: number;
   };
   by_tier: Record<Tier, number>;
+  /** Output images billed, by tier. */
+  by_image_tier?: Record<ImageTier, number>;
+  /** Minutes by codec (image jobs are not counted here). */
   by_codec: Record<Codec, number>;
   series: UsagePoint[];
 }
@@ -1066,6 +1128,17 @@ export interface RateCard {
   tiers: Record<Tier, string>;
 }
 
+/** Price per output image, in dollars, by the pixels it came out at. */
+export interface ImageRateCard {
+  unit: 'output_image';
+  currency: 'usd';
+  up_to_1mp: number;
+  up_to_4mp: number;
+  over_4mp: number;
+  /** What each tier covers, e.g. `"up to 1 megapixel"`. */
+  tiers: Record<ImageTier, string>;
+}
+
 export interface Plan {
   object: 'plan';
   id: PlanId;
@@ -1084,6 +1157,8 @@ export interface Plan {
   trial_credit_cents: number;
   trial_days: number;
   rates: RateCard;
+  /** Image output prices. */
+  image_rates?: ImageRateCard;
   max_concurrent_jobs: number;
   max_resolution: number;
   max_input_bytes?: number;
@@ -1147,12 +1222,16 @@ export interface Billing {
   object: 'billing';
   plan: Plan;
   rates: RateCard;
+  /** Image output prices. */
+  image_rates?: ImageRateCard;
   account: CreditAccount;
   /** `YYYY-MM`. */
   period: string;
   period_start: Timestamp;
   period_end: Timestamp;
   usage_minutes: number;
+  /** Output images billed this period. */
+  usage_images?: number;
   usage_usd: number;
   currency: 'usd';
   /** False when this installation takes no payments: credit is granted by the operator. */
@@ -1218,7 +1297,7 @@ export interface StatementLine {
   credit_usd: number;
   date?: Timestamp;
   quantity?: number;
-  unit?: 'output_minute';
+  unit?: 'output_minute' | 'output_image';
 }
 
 /** A monthly statement: credit added and the usage drawn from it. */
@@ -1232,6 +1311,8 @@ export interface Statement {
   status: 'open' | 'closed';
   lines: StatementLine[];
   usage_minutes: number;
+  /** Output images billed this period. */
+  usage_images?: number;
   usage_cents: number;
   currency: 'usd';
 }
@@ -1245,11 +1326,44 @@ export type InvoiceLine = StatementLine;
 // Public service info
 // ---------------------------------------------------------------------------
 
+/** An image output format, as `GET /v1/capabilities` lists it. */
+export interface ImageFormatInfo {
+  id: ImageFormat | (string & {});
+  name: string;
+  default: boolean;
+  /** Takes `image.quality`. */
+  lossy: boolean;
+  /** Can be lossless (PNG always, WebP with `image.lossless`). */
+  lossless: boolean;
+  /** Keeps transparency. */
+  alpha: boolean;
+  /** The quality used when `image.quality` is left out; lossy formats only. */
+  default_quality?: number;
+}
+
+/** Image output limits. */
+export interface ImageLimits {
+  /** Smallest rendition side. */
+  min_dimension: number;
+  /** Largest rendition side. */
+  max_dimension: number;
+  /** Most files one job may make: stills × renditions × formats. */
+  max_outputs: number;
+  /** Most stills one video may give. */
+  max_frames: number;
+  /** Largest image input. */
+  max_input_megapixels: number;
+}
+
 export interface Capabilities {
   codecs?: string[];
   modes?: string[];
   color?: string[];
-  limits?: Record<string, unknown>;
+  limits?: Record<string, unknown> & { image?: ImageLimits };
+  /** Image output formats; empty when image output is unavailable. */
+  image_formats?: ImageFormatInfo[];
+  /** Image inputs read: `jpeg`, `png`, `webp`, `avif`, `gif` (first frame), `tiff`, `bmp`, `heic`. */
+  input_image_formats?: string[];
   filters?: string[];
   system_presets?: Preset[];
   [key: string]: unknown;
