@@ -1,17 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { InvalidRequestError, PLATFORMS, PRESET_CATEGORIES, Transcdr, isSession, type Connection, type WebhookEndpoint } from '../src';
 import { json, mockFetch } from './helpers';
+import { audioMp3, singleMp4 } from './specs';
 
 function client(fetch: ReturnType<typeof mockFetch>['fetch'], maxRetries = 2) {
   return new Transcdr({ apiKey: 'tdk_test_abc', baseUrl: 'http://api.test', fetch, retryDelayMs: 1, maxRetries });
 }
 
-const preset = { object: 'preset', id: 'pre_1', slug: 'mine', name: 'Mine', description: '', system: false, output: {}, metadata: {} };
+const preset = { object: 'preset', id: 'pre_1', slug: 'mine', name: 'Mine', description: '', system: false, version: 1, output: singleMp4, metadata: {} };
 
 describe('idempotent creates', () => {
   const creates: [string, string, (t: Transcdr) => Promise<unknown>][] = [
     ['assets', '/v1/assets', (t) => t.assets.create({ url: 'https://example.com/a.mp4' })],
-    ['presets', '/v1/presets', (t) => t.presets.create({ name: 'Mine', output: {} })],
+    ['presets', '/v1/presets', (t) => t.presets.create({ name: 'Mine', output: singleMp4 })],
     ['webhooks', '/v1/webhooks', (t) => t.webhooks.create({ url: 'https://example.com/hook' })],
     ['connections', '/v1/connections', (t) => t.connections.create({ name: 'c', kind: 's3', config: { bucket: 'b' } })],
     ['automations', '/v1/automations', (t) => t.automations.create({ name: 'a', source: { connection_id: 'con_1' } })],
@@ -34,7 +35,7 @@ describe('idempotent creates', () => {
       json({ error: { type: 'api_error', code: 'unavailable', message: 'x' } }, 503),
       json(preset, 201, { 'idempotent-replayed': 'true' }),
     );
-    const created = await client(fetch).presets.create({ name: 'Mine', output: {} });
+    const created = await client(fetch).presets.create({ name: 'Mine', output: singleMp4 });
     expect(created.id).toBe('pre_1');
     expect(calls).toHaveLength(2);
     expect(calls[1].headers['idempotency-key']).toBe(calls[0].headers['idempotency-key']);
@@ -52,7 +53,7 @@ describe('idempotent creates', () => {
       json({ error: { type: 'invalid_request_error', code: 'idempotency_key_reused', message: 'x' } }, 409),
     );
     const err = await client(fetch)
-      .presets.create({ name: 'Mine', output: {} }, { idempotencyKey: 'k1' })
+      .presets.create({ name: 'Mine', output: singleMp4 }, { idempotencyKey: 'k1' })
       .catch((e) => e);
     expect(err).toBeInstanceOf(InvalidRequestError);
     expect(err.code).toBe('idempotency_key_reused');
@@ -70,10 +71,10 @@ describe('idempotent creates', () => {
 describe('presets', () => {
   it('replaces with PUT', async () => {
     const { fetch, calls } = mockFetch(json(preset));
-    await client(fetch).presets.replace('pre_1', { name: 'Mine', output: { codec: 'av1' } });
+    await client(fetch).presets.replace('pre_1', { name: 'Mine', output: audioMp3 });
     expect(calls[0].method).toBe('PUT');
     expect(calls[0].url).toBe('http://api.test/v1/presets/pre_1');
-    expect(calls[0].body).toEqual({ name: 'Mine', output: { codec: 'av1' } });
+    expect(calls[0].body).toEqual({ name: 'Mine', output: audioMp3 });
     expect(calls[0].headers['idempotency-key']).toBeUndefined();
   });
 
@@ -107,7 +108,7 @@ describe('presets', () => {
     const t = client(fetch);
     await t.presets.create({
       name: 'Mine',
-      output: { codec: 'h264' },
+      output: singleMp4,
       category: 'tv',
       compatibility: ['smart_tv', 'legacy'],
       compatibility_notes: { smart_tv: 'Our set-top box app.' },

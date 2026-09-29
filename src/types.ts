@@ -1,5 +1,4 @@
-// Wire types for the Transcdr v1 API. These mirror `docs/api-contract.md`
-// and the Rust types in `crates/transcdr-core` field for field.
+// Wire types for the Transcdr v1 API, with output spec v2. They mirror the API reference field for field.
 
 /** RFC 3339 UTC timestamp, e.g. `2026-09-26T12:00:00Z`. */
 export type Timestamp = string;
@@ -34,215 +33,359 @@ export interface ListParams {
 }
 
 // ---------------------------------------------------------------------------
-// Output specification
+// Output specification (v2)
 // ---------------------------------------------------------------------------
+//
+// A spec is declared in sections, and nothing has a default: a spec states every field its kind, container, codec
+// and handling need. A value that follows the source is written out (`"source"`, `"standard"`, `"from_color"`,
+// `"by_size"`, `"poster"`, `"segment"`, `"all"`). Required fields are required in these types; a field whose need
+// depends on another (an audio bitrate for a lossy codec, `stereo_fallback` in HLS, …) is optional here and checked
+// by `validateOutput`, which reports every missing path at once, as the API's 422 `errors` does.
+
+/** What a job produces. */
+export type Kind = 'video' | 'audio' | 'image';
+/** Every kind. */
+export const KINDS = ['video', 'audio', 'image'] as const;
+
+/** `mp4`: one faststart MP4 per size. `hls`: a CMAF/HLS package, cut into segments. */
+export type VideoContainer =
+  | { format: 'mp4'; segment_seconds?: never }
+  | {
+      format: 'hls';
+      /** Seconds per segment, 1–20. */
+      segment_seconds: number;
+    };
+
+/** `mp3` holds MP3 only, `flac` FLAC only, `m4a` any codec. */
+export type AudioContainerFormat = 'mp3' | 'flac' | 'm4a';
+export interface AudioContainer {
+  format: AudioContainerFormat;
+}
+
+/** H.265 (HEVC) needs a paid plan. */
+export type Codec = 'av1' | 'h264' | 'h265';
+/** A quality level, or `vmaf=N` (1–100). */
+export type QualityLevel = 'visually_lossless' | 'high' | 'standard' | 'low' | `vmaf=${number}`;
+/** A bit rate such as `"128k"`, `"5M"` or `"2500000"`. */
+export type Bitrate = string;
+
+/** Constant bit rate. */
+export interface Cbr {
+  /** 100k–200M, or `"standard"`: a rate for each size by codec, short side and frame rate. */
+  bitrate: Bitrate | 'standard';
+  /** The rate buffer, 100–10000 ms. */
+  buffer_ms: number;
+}
+
+/** How the video is coded: exactly one of `quality`, `crf` and `cbr`. */
+export type VideoRate =
+  | { quality: QualityLevel; crf?: never; cbr?: never }
+  | { crf: number; quality?: never; cbr?: never }
+  | { cbr: Cbr; quality?: never; crf?: never };
+
+/** `from_color`: 8-bit for `sdr`, 10-bit for `hdr10` and `hlg`, the source's depth for `passthrough`. */
+export type VideoBitDepth = 'from_color' | '8bit' | '10bit';
+/** `hdr10` and `hlg` need a paid plan, and `from_color` or `10bit`. */
+export type Color = 'sdr' | 'hdr10' | 'hlg' | 'passthrough';
+
+export interface FrameRate {
+  /** A cap in frames per second (1–240), or `"source"`: the source's rate, not capped. */
+  max: number | 'source';
+}
 
 /**
- * `single` (one MP4), `hls` (an adaptive ladder), `audio` (the audio alone as one file: an `.mp3`, `.flac` or
- * `.m4a`, see `Audio.container`) or `image` (still images of an image or a video, see `OutputSpec.image`).
+ * The keyframe interval: `{frames: 1..1200}`, `{seconds: N}`, or (HLS only) `"segment"`: one keyframe at the start
+ * of each segment and none inside it.
  */
-export type Mode = 'single' | 'hls' | 'audio' | 'image';
-/** An image output format: `avif` (the default, the smallest), `webp`, `jpeg` or `png` (always lossless). */
-export type ImageFormat = 'avif' | 'webp' | 'jpeg' | 'png';
-/** Every image output format, in display order. */
-export const IMAGE_FORMATS = ['avif', 'webp', 'jpeg', 'png'] as const;
-export type Codec = 'av1' | 'h264' | 'h265';
+export type Gop = { frames: number; seconds?: never } | { seconds: number; frames?: never } | 'segment';
+
+/** The video track. */
+export type Video = {
+  codec: Codec;
+  bit_depth: VideoBitDepth;
+  color: Color;
+  frame_rate: FrameRate;
+  gop: Gop;
+  /** A filter chain, one filter per entry, such as `["crop=1280:720", "hflip"]`; `[]` for none. */
+  filters: string[];
+} & VideoRate;
+
 /**
- * `auto` passes compatible audio through and transcodes the rest (to Opus, or to MP3 in an audio-only `.mp3`).
- * `aac` is AAC-LC, the choice that plays on the most devices (an AAC source passes through). `mp3` is constant bit
- * rate, stereo at most, in a single MP4 or audio-only output (not HLS). `flac` and `alac` are lossless (a source
- * already in that codec is copied) and take no bitrate.
+ * `auto`: keep the source's audio where the container can carry it unchanged, otherwise make it `codec`.
+ * `encode`: make it `codec` (a source already in `codec`, with nothing else changed, is copied). `drop`: no audio.
  */
-export type AudioMode = 'auto' | 'opus' | 'mp3' | 'aac' | 'flac' | 'alac' | 'drop';
-/** FLAC and ALAC sample depth. `source` (the default) is 16-bit for a 16-bit or lossy source, 24-bit for a deeper one. */
+export type AudioHandling = 'auto' | 'encode' | 'drop';
+/** `aac` is AAC-LC, which plays everywhere; `mp3` is stereo at most and not for HLS; `flac` and `alac` are lossless. */
+export type AudioCodec = 'opus' | 'mp3' | 'aac' | 'flac' | 'alac';
+/** Every audio codec. */
+export const AUDIO_CODECS = ['opus', 'mp3', 'aac', 'flac', 'alac'] as const;
+/** The output layout; `source` keeps the source's. Audio is never upmixed. */
+export type AudioChannels = 'source' | 'mono' | 'stereo' | '5.1' | '7.1';
+/** Every audio channel layout, in display order. */
+export const AUDIO_CHANNELS = ['source', 'mono', 'stereo', '5.1', '7.1'] as const;
+/** FLAC and ALAC sample depth. `source`: 16-bit for a 16-bit or lossy source, 24-bit for a deeper one. */
 export type AudioBitDepth = 'source' | '16' | '24';
-/** FLAC compression effort: the same audio either way, a smaller file for more work. Default `default`. */
-export type FlacCompression = 'fast' | 'default' | 'best';
+/** FLAC compression effort: the same audio either way, a smaller file for more work. */
+export type FlacCompression = 'fast' | 'balanced' | 'best';
 /**
- * What an HE-AAC (or HE-AAC v2) source becomes. HE-AAC is decoded only as its AAC-LC core: spectral band replication
- * and parametric stereo are not decoded, so the core has half the stream's sample rate, less bandwidth and, for v2, one
- * channel. `auto` (the default) passes it through when only a codec change is asked and decodes its core when the job
- * needs PCM (a downmix, an `.mp3` or `.flac` file); `passthrough` never decodes it, and a job that would need it
- * decoded fails; `core` decodes its core whenever another codec is asked. AAC-LC sources are decoded in full whatever
- * it says.
+ * What an HE-AAC (or HE-AAC v2) source becomes. It decodes only as its AAC-LC core (half the sample rate, less
+ * bandwidth, and for v2 one channel). `auto` keeps it where only a codec change is asked and decodes its core where
+ * the job needs PCM; `passthrough` never decodes it (a job that would need it fails); `core` decodes its core whenever
+ * another codec or a change is asked.
  */
 export type HeAac = 'auto' | 'passthrough' | 'core';
 /** Every HE-AAC policy, in display order. */
 export const HE_AAC = ['auto', 'passthrough', 'core'] as const;
+
+interface AudioTrackBase {
+  handling: 'auto' | 'encode';
+  channels: AudioChannels;
+  he_aac: HeAac;
+  /** Required in HLS: a stereo downmix beside surround audio. Needs `channels` `source`, `5.1` or `7.1`. */
+  stereo_fallback?: boolean;
+}
+
+/** Opus, MP3 or AAC. */
+export interface LossyAudio extends AudioTrackBase {
+  codec: 'opus' | 'mp3' | 'aac';
+  /**
+   * A rate (MP3: 32k, 40k, 48k, 56k, 64k, 80k, 96k, 112k, 128k, 160k, 192k, 224k, 256k or 320k; AAC: 8k–288k per
+   * main channel), or `"standard"`: AAC 64k mono, 128k stereo, 384k 5.1, 512k 7.1; Opus 96k stereo, 320k 5.1,
+   * 416k 7.1; MP3 64k mono, 128k stereo.
+   */
+  bitrate: Bitrate | 'standard';
+  bit_depth?: never;
+  flac_compression?: never;
+}
+
+export interface FlacAudio extends AudioTrackBase {
+  codec: 'flac';
+  bit_depth: AudioBitDepth;
+  flac_compression: FlacCompression;
+  bitrate?: never;
+}
+
+export interface AlacAudio extends AudioTrackBase {
+  codec: 'alac';
+  bit_depth: AudioBitDepth;
+  bitrate?: never;
+  flac_compression?: never;
+}
+
+/** An audio track: `handling` `auto` or `encode`. */
+export type AudioTrack = LossyAudio | FlacAudio | AlacAudio;
+
+/** No audio track (video only). */
+export interface AudioDrop {
+  handling: 'drop';
+  codec?: never;
+  bitrate?: never;
+  channels?: never;
+  he_aac?: never;
+  stereo_fallback?: never;
+  bit_depth?: never;
+  flac_compression?: never;
+}
+
+/** The audio track of a video: a track, or none. */
+export type Audio = AudioTrack | AudioDrop;
+
 /**
- * The file audio-only output is. `auto` (the default) follows the codec: `.flac` for FLAC, `.m4a` for ALAC, `.mp3`
- * otherwise (`auto` audio is then MP3). `m4a` holds any codec (`auto` audio in an `.m4a` is Opus); `.flac` holds FLAC
- * only and `.mp3` holds MP3 only.
- */
-export type AudioContainer = 'auto' | 'mp3' | 'flac' | 'm4a';
-/**
- * Audio channel layout. `source` keeps the source's; the rest downmix and never upmix (asking for more
- * channels than the source has fails the job). MP3 carries `source`, `mono` or `stereo` only.
- */
-export type AudioChannels = 'source' | 'mono' | 'stereo' | '5.1' | '7.1';
-/** Every audio channel layout, in display order. */
-export const AUDIO_CHANNELS = ['source', 'mono', 'stereo', '5.1', '7.1'] as const;
-/**
- * How a video meets a rendition's box: `contain` (default) keeps its shape inside the box, `cover` fills the box and
- * centre-crops, `pad` keeps its shape and adds black bars to exactly the box, `stretch` distorts it to exactly the box.
+ * How the picture meets a size's box: `contain` keeps its shape inside the box, `cover` fills the box and
+ * centre-crops, `pad` keeps its shape and adds bars to exactly the box, `stretch` distorts it to exactly the box.
  */
 export type Fit = 'contain' | 'cover' | 'pad' | 'stretch';
 /** Every fit, in display order. */
 export const FITS = ['contain', 'cover', 'pad', 'stretch'] as const;
-/**
- * `auto` (default): a rendition's box turns to the video's orientation, so 1920×1080 on a portrait video is 1080×1920.
- * `fixed`: the box is used as written.
- */
+/** `auto`: the box turns to the picture's orientation (1920×1080 on a portrait video is 1080×1920). `fixed`: as written. */
 export type Orientation = 'auto' | 'fixed';
 /** Every orientation. */
 export const ORIENTATIONS = ['auto', 'fixed'] as const;
-export type Color = 'sdr' | 'hdr10' | 'hlg' | 'passthrough';
-export type BitDepth = 'auto' | '8bit' | '10bit';
-/**
- * `visually_lossless` | `high` | `standard` | `low` | `vmaf=N` (1–100), or `cbr`
- * to code every rendition at a constant bit rate instead of to a quality level.
- */
-export type QualityTarget = 'visually_lossless' | 'high' | 'standard' | 'low' | `vmaf=${number}` | 'cbr';
 
-/**
- * One output. `width` × `height` is the largest it may be: the video keeps its shape inside that box (see
- * `OutputSpec.fit`) and is not enlarged past its own size unless `upscale` is on. Each output reports the size it
- * came out at.
- */
-export interface Rendition {
-  /** Maximum width; even, 64–7680. Mode `image`: 16–8192, odd sizes allowed. */
+/** 1–32 of `A–Z a–z 0–9 - _`, or `"by_size"`: video `<short side>p` of the size it comes out at, image `WxH`. */
+export type Label = string;
+
+/** One size: `width` × `height` is a box the picture is fitted into, not the output size. */
+export interface Size {
+  label: Label | 'by_size';
+  /** Video: even, 64–7680, within the plan's maximum. Image: 16–8192. */
   width: number;
-  /** Maximum height; even, 64–4320. Mode `image`: 16–8192, odd sizes allowed. */
+  /** Video: even, 64–4320. Image: 16–8192. */
   height: number;
-  /**
-   * This rendition's constant bitrate, such as `"3M"` or `"800k"` (100k–200M), when
-   * `quality.target` is `"cbr"`; refused otherwise. Omitted, it takes `quality.bitrate`
-   * or a default for its resolution and codec.
-   */
-  bitrate?: string | null;
-  /** Display label, 1–32 of `[A-Za-z0-9_-]`; defaults to `"<short side>p"` of the size it comes out at. */
-  label?: string | null;
-  /** This rendition's own fit, over `OutputSpec.fit`. */
-  fit?: Fit | null;
-  /** `fixed` keeps this rendition's box as written, e.g. a 9:16 `cover` rendition that crops a landscape video. */
-  orientation?: Orientation | null;
-  /** This rendition's own `upscale`, over `OutputSpec.upscale`. */
-  upscale?: boolean | null;
+  fit: Fit;
+  orientation: Orientation;
+  /** Let the output be larger than the source. */
+  upscale: boolean;
+  /** With `video.cbr` only, optional: this size's own constant rate, over `video.cbr.bitrate`. */
+  video?: { cbr: { bitrate: Bitrate | 'standard' } };
 }
 
+/** An automatic ladder of the standard short sides up to `max_short_side`, never above the source (video only). */
 export interface Ladder {
-  /** Cap the tallest rung's short side, e.g. `1080`. */
-  max_short_side?: number | null;
+  /** The top rung's short side, 64 up to the plan's maximum. */
+  max_short_side: number;
+  fit: Fit;
+  upscale: boolean;
 }
 
-export interface Quality {
-  target?: QualityTarget | string | null;
-  /** 0–63; wins over `target`. Not with `"cbr"`. */
-  crf?: number | null;
-  /** `"cbr"` only: the rate for renditions without their own, such as `"5M"` (100k–200M). */
-  bitrate?: string | null;
-  /** `"cbr"` only: the rate buffer in milliseconds, 100–10000 (default 1000). */
-  buffer_ms?: number | null;
+/** One output at the source's own size. */
+export interface SourceSize {
+  label: Label | 'by_size';
+  fit: Fit;
+  upscale: boolean;
 }
 
-export interface Audio {
-  mode?: AudioMode;
-  /**
-   * Bitrate such as `"128k"` (6k–512k). MP3 takes 32k, 40k, 48k, 56k, 64k, 80k, 96k, 112k, 128k, 160k,
-   * 192k, 224k, 256k or 320k (default 128k stereo, 64k mono). AAC takes 8k to 288k per main channel (the LFE
-   * does not count; default 64k mono, 128k stereo, 384k 5.1, 512k 7.1). Not with `flac` or `alac`.
-   */
-  bitrate?: string | null;
-  /** Channel layout; left out, the source's (`source`). */
-  channels?: AudioChannels;
-  /** HLS with surround audio: also add a stereo rendition to the same audio group. Default false. */
-  stereo_fallback?: boolean;
-  /** `flac` and `alac` only: the output's sample depth. */
-  bit_depth?: AudioBitDepth;
-  /** `flac` only: the compression effort. */
-  flac_compression?: FlacCompression;
-  /** Mode `audio` only: the file the output is. Left out, `auto`. */
-  container?: AudioContainer;
-  /** What an HE-AAC source becomes. Left out, `auto`. Not with `drop`. */
-  he_aac?: HeAac;
+/** The sizes of a video: exactly one of `sizes`, `ladder` and `source_size`. */
+export type VideoRenditions =
+  | { sizes: Size[]; ladder?: never; source_size?: never }
+  | { ladder: Ladder; sizes?: never; source_size?: never }
+  | { source_size: SourceSize; sizes?: never; ladder?: never };
+
+/** The sizes of images: exactly one of `sizes` and `source_size`. */
+export type ImageRenditions =
+  | { sizes: Size[]; ladder?: never; source_size?: never }
+  | { source_size: SourceSize; sizes?: never; ladder?: never };
+
+/** The subtitle tracks carried: `{tracks: "all" | "none"}` or `{languages: [...]}` (ISO 639-2 codes). */
+export type Subtitles = { tracks: 'all' | 'none'; languages?: never } | { languages: string[]; tracks?: never };
+
+/** The part of the source used, in seconds. */
+export interface Trim {
+  start: number;
+  /** After `start`, or `"source"`: the end of the source. */
+  end: number | 'source';
+}
+
+/** An image output format; PNG is always lossless. */
+export type ImageFormat = 'avif' | 'webp' | 'jpeg' | 'png';
+/** Every image output format, in display order. */
+export const IMAGE_FORMATS = ['avif', 'webp', 'jpeg', 'png'] as const;
+/** The lossy image formats, which take a quality. */
+export type LossyImageFormat = 'avif' | 'webp' | 'jpeg';
+
+/**
+ * Which stills: `"poster"` (an image input as it is; a video's frame 10% of the way in), or for a video input
+ * `{count: 1..100}` evenly spaced, or `{at_seconds: [...]}` (1–100 times).
+ */
+export type ImageFrames = 'poster' | { count: number; at_seconds?: never } | { at_seconds: number[]; count?: never };
+
+/** Still images: every size is made in every format. */
+export interface ImageSpec {
+  /** 1–4 distinct formats. */
+  formats: ImageFormat[];
+  /** Required with `webp`: lossless WebP. */
+  lossless?: boolean;
+  /** Required when a lossy format is made: one entry, 1–100, for each lossy format made and no others. */
+  quality?: Partial<Record<LossyImageFormat, number>>;
+  /** `srgb` converts the pixels; `keep` keeps the source's profile (PNG, JPEG, WebP). */
+  color_profile: 'srgb' | 'keep';
+  frames: ImageFrames;
+}
+
+/** A starting point for `privacy`. */
+export type PrivacyPreset = 'strip_all' | 'strip_location' | 'keep_all';
+export type LocationHandling = 'strip' | 'approximate' | 'keep';
+export type CaptureTimeHandling = 'strip' | 'date' | 'keep';
+export type DeviceHandling = 'strip' | 'keep' | 'keep_all';
+export type DescriptiveHandling = 'strip' | 'keep';
+
+/** Every category written out. Responses always show privacy this way. */
+export interface PrivacyFields {
+  /** GPS coordinates and place names; `approximate` rounds to about 1 km. */
+  location: LocationHandling;
+  /** When it was recorded; `date` keeps the day only. */
+  capture_time: CaptureTimeHandling;
+  /** Make, model, lens, software; `keep_all` adds serial numbers and the owner name. */
+  device: DeviceHandling;
+  /** Title, artist, copyright, comment and other tags. */
+  descriptive: DescriptiveHandling;
+  preset?: never;
+}
+
+/** A preset, with any of the categories refining it. */
+export interface PrivacyFromPreset {
+  preset: PrivacyPreset;
+  location?: LocationHandling;
+  capture_time?: CaptureTimeHandling;
+  device?: DeviceHandling;
+  descriptive?: DescriptiveHandling;
 }
 
 /**
- * A video input's stills in an image job: at these times, or this many evenly spaced. Give one or the other; neither
- * is one frame 10% of the way in. An image input refuses `frames`.
+ * Which identifying metadata survives: a `preset` (`strip_all` keeps nothing, `strip_location` keeps all but
+ * location, `keep_all` keeps everything) with any categories given refining it, or all four categories without a
+ * preset. HLS keeps nothing.
  */
-export interface ImageFrames {
-  /** Seconds from the start, 1–100 of them, each within the video. */
-  at_seconds?: number[];
-  /** 1–100 stills, evenly spaced through the video. */
-  count?: number;
-}
+export type Privacy = PrivacyFromPreset | PrivacyFields;
 
-/** Mode `image` only: every rendition is made in every format. */
-export interface ImageSpec {
-  /** 1–4 distinct formats; `['avif']` when left out. */
-  formats?: ImageFormat[];
-  /** 1–100, for the lossy formats. Left out, each format's own default (AVIF 60, WebP 80, JPEG 82). */
-  quality?: number;
-  /** Lossless WebP. Only with `webp` and `png` (PNG is always lossless). */
-  lossless?: boolean;
-  /** Keep the source's colour profile instead of converting to sRGB. EXIF, XMP and GPS are never kept. */
-  keep_color_profile?: boolean;
-  /** A video input's stills. */
-  frames?: ImageFrames;
-}
-
-export interface Trim {
-  start?: number;
-  end?: number | null;
-}
-
-/** The output specification. Every field has a default; see the docs. */
-export interface OutputSpec {
-  mode: Mode;
-  codec: Codec;
-  renditions: Rendition[];
-  /** How the video meets each rendition's box; `contain` unless set. */
-  fit: Fit;
-  /** Let a rendition be larger than the source; `false` unless set. */
-  upscale: boolean;
-  ladder: Ladder | null;
-  quality: Quality;
-  gop: number | null;
-  segment_seconds: number | null;
+/** Video: an MP4 per size, or an HLS package. */
+export interface VideoOutput {
+  kind: 'video';
+  container: VideoContainer;
+  video: Video;
   audio: Audio;
-  subtitles: string | null;
-  color: Color;
-  bit_depth: BitDepth;
-  max_fps: number | null;
-  filters: string | null;
-  trim: Trim | null;
-  /** Mode `image` only; absent otherwise. */
-  image?: ImageSpec | null;
+  renditions: VideoRenditions;
+  subtitles: Subtitles;
+  trim: Trim;
+  privacy: Privacy;
+  image?: never;
 }
 
-/** A partial spec, as sent on job creation (merged over the preset). */
-export interface OutputSpecInput {
-  mode?: Mode;
-  codec?: Codec;
-  renditions?: Rendition[];
-  /** `contain` (default), `cover`, `pad` or `stretch`. */
-  fit?: Fit;
-  /** Let a rendition be larger than the source (default `false`). */
-  upscale?: boolean;
-  ladder?: Ladder | null;
-  quality?: Quality;
-  gop?: number | null;
-  segment_seconds?: number | null;
-  audio?: Audio;
-  subtitles?: string | null;
-  color?: Color;
-  bit_depth?: BitDepth;
-  max_fps?: number | null;
-  filters?: string | null;
-  trim?: Trim | null;
-  /** Mode `image` only: the formats, quality and, for a video input, which stills. */
-  image?: ImageSpec | null;
+/** The audio alone, as one file. */
+export interface AudioOutput {
+  kind: 'audio';
+  container: AudioContainer;
+  audio: AudioTrack;
+  privacy: Privacy;
+  video?: never;
+  image?: never;
+  renditions?: never;
+  subtitles?: never;
+  trim?: never;
+}
+
+/** Still images of an image, or stills taken from a video. */
+export interface ImageOutput {
+  kind: 'image';
+  image: ImageSpec;
+  renditions: ImageRenditions;
+  privacy: Privacy;
+  container?: never;
+  video?: never;
+  audio?: never;
+  subtitles?: never;
+  trim?: never;
+}
+
+/** A complete output specification (v2). Jobs, presets and automations return it fully resolved. */
+export type OutputSpec = VideoOutput | AudioOutput | ImageOutput;
+
+/**
+ * `T` with every field optional, and `null` to remove one: a partial merged over a preset. Objects merge key by
+ * key; scalars and arrays replace; one choice of an exclusive group (`crf` over `quality`, `ladder` over `sizes`,
+ * `languages` over `tracks`, …) replaces the others.
+ */
+export type Override<T> = T extends readonly unknown[]
+  ? T
+  : T extends object
+    ? { [K in keyof T]?: Override<T[K]> | null }
+    : T;
+
+/**
+ * Fields to change in a preset's spec (sent with `preset`). `kind` cannot change; the merged result must be complete,
+ * so a field that no longer applies (say `segment_seconds` after switching to `mp4`) must be set to `null`.
+ */
+export type OutputOverrides = Override<OutputSpec>;
+
+/** Where a job's spec came from: the preset version and the request's overrides over it. */
+export interface PresetProvenance {
+  /** The preset's id. */
+  id: string;
+  slug: string;
+  /** The version the job was resolved from. */
+  version: number;
+  /** The request's `output` over the preset, in v2; `null` for none. */
+  overrides: OutputOverrides | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +539,9 @@ export interface Job {
   input: JobInput;
   input_info: MediaInfo | null;
   preset_id: string | null;
+  /** The preset version and overrides the spec was resolved from; `null` for a job given its whole spec. */
+  preset: PresetProvenance | null;
+  /** The resolved, complete spec: what runs. Rerunning or duplicating a job uses it. */
   output: OutputSpec;
   priority: Priority;
   progress: Progress;
@@ -422,12 +568,8 @@ export interface Job {
   updated_at: Timestamp;
 }
 
-export interface JobCreateParams {
+interface JobCreateBase {
   input: JobInput;
-  /** Overrides merged over the preset's spec (objects merge, arrays replace, `null` clears). */
-  output?: OutputSpecInput;
-  /** A system preset slug (e.g. `hls-av1-abr`) or a `pre_…` id. */
-  preset?: string;
   priority?: Priority;
   metadata?: Metadata;
   webhook_url?: string;
@@ -439,6 +581,24 @@ export interface JobCreateParams {
    */
   max_cost_cents?: number;
 }
+
+/**
+ * A job names a preset (a system slug such as `hls-h264-abr`, your preset's slug or `pre_…` id, the latest version,
+ * or `slug@N` for version N) with optional overrides, or gives its whole spec.
+ */
+export type JobCreateParams = JobCreateBase &
+  (
+    | {
+        preset: string;
+        /** Fields over the preset's version: objects merge, arrays replace, `null` removes. */
+        output?: OutputOverrides;
+      }
+    | {
+        preset?: undefined;
+        /** The whole spec, complete. Checked before it is sent (see `validateOutput`). */
+        output: OutputSpec;
+      }
+  );
 
 export interface JobListParams extends ListParams {
   status?: JobStatus;
@@ -558,10 +718,22 @@ export interface Preset {
   compatibility: Platform[];
   /** Minimum versions and conditions, by platform in `compatibility`. */
   compatibility_notes: Partial<Record<Platform, string>>;
+  /** Its latest version. Versions never change: editing the output adds one. */
+  version: number;
+  /** The latest version's spec, complete. */
   output: OutputSpec;
   metadata: Metadata;
   created_at: Timestamp | null;
   updated_at: Timestamp | null;
+}
+
+/** One version of a preset: a complete spec that never changes. */
+export interface PresetVersion {
+  object: 'preset_version';
+  version: number;
+  output: OutputSpec;
+  /** `null` for system presets. */
+  created_at: Timestamp | null;
 }
 
 export interface PresetListParams extends ListParams {
@@ -577,7 +749,8 @@ export interface PresetCreateParams {
   name: string;
   slug?: string;
   description?: string;
-  output: OutputSpecInput;
+  /** The whole spec, complete. Checked before it is sent (see `validateOutput`). */
+  output: OutputSpec;
   metadata?: Metadata;
   /** Left out: derived from `output`. */
   category?: PresetCategory;
@@ -588,14 +761,14 @@ export interface PresetCreateParams {
 }
 
 /**
- * `PATCH`: fields left out are unchanged; `output` merges into the stored spec; `null` clears
- * (`category`, `compatibility` and `compatibility_notes` are then derived from `output` again).
+ * `PATCH`: fields left out are unchanged; `output` merges over the latest version, and a changed spec is a new
+ * version; `null` clears (`category`, `compatibility` and `compatibility_notes` are then derived from `output` again).
  */
 export interface PresetUpdateParams {
   name?: string;
   slug?: string;
   description?: string | null;
-  output?: OutputSpecInput;
+  output?: OutputOverrides;
   metadata?: Metadata | null;
   category?: PresetCategory | null;
   compatibility?: Platform[] | null;
@@ -603,13 +776,14 @@ export interface PresetUpdateParams {
 }
 
 /**
- * `PUT`: the whole preset. `output` is the full spec (fields left out take their defaults);
+ * `PUT`: the whole preset. `output` is the whole spec, complete (a changed spec is a new version);
  * `description` and `metadata` left out are emptied; `category`, `compatibility` and
  * `compatibility_notes` left out are derived again; `slug` left out is kept.
  */
 export interface PresetReplaceParams {
   name: string;
-  output: OutputSpecInput;
+  /** The whole spec, complete. Checked before it is sent (see `validateOutput`). */
+  output: OutputSpec;
   slug?: string;
   description?: string;
   metadata?: Metadata;
@@ -1355,7 +1529,53 @@ export interface ImageLimits {
   max_input_megapixels: number;
 }
 
+/** A condition: any one of these objects; one holds when every path in it has one of the listed values (`"*"`: present, `"!"`: absent). */
+export type OutputCondition = Record<string, string[]>[];
+
+/** One field of the output spec, as data. */
+export interface OutputFieldInfo {
+  /** Relative to `output`; `[]` stands for each entry of a list (`renditions.sizes[].fit`). */
+  path: string;
+  /** Needed whenever `when` holds; when `false`, allowed whenever it holds. Outside `when`, refused. */
+  required: boolean;
+  when: OutputCondition;
+  /** The value's shape: `{type: "enum", values}`, `{type: "number", min, max, words}`, `{type: "bitrate", words}`, … */
+  shape: { type: string; [key: string]: unknown };
+  /** Its exclusive group, if it is one of several choices. */
+  group: string | null;
+  description: string;
+}
+
+/** Choices of which exactly one is given whenever `when` holds. */
+export interface OutputGroupInfo {
+  name: string;
+  members: string[];
+  when: OutputCondition;
+  exactly_one: boolean;
+}
+
+/** `capabilities.output`: the v2 output spec described as data, for checking a spec before sending it. */
+export interface OutputCapabilities {
+  version: number;
+  kinds: Kind[];
+  fields: OutputFieldInfo[];
+  groups: OutputGroupInfo[];
+  /** How to read `when`, in words. */
+  conditions: string;
+  /** Each container, its kind and the audio codecs it holds. */
+  containers: { id: string; kind: Kind; audio_codecs: AudioCodec[] }[];
+  audio_codecs: { id: AudioCodec; name: string; lossless: boolean; max_channels: number; bitrates: string[] | null }[];
+  /** The values that follow the source (`"video.frame_rate.max: source"`) and what each resolves to. */
+  follow_values: Record<string, string>;
+  compatibility: {
+    v1_requests: string;
+    v1_responses: { header: string; value: string; query: string; sunset: string };
+  };
+}
+
 export interface Capabilities {
+  /** The v2 output spec: every field, when it is required, and what it takes. */
+  output?: OutputCapabilities;
   codecs?: string[];
   modes?: string[];
   color?: string[];
@@ -1399,62 +1619,6 @@ export interface Stats {
 }
 
 // ---------------------------------------------------------------------------
-// Platform operator console (`/v1/admin`, session tokens of operators only)
-// ---------------------------------------------------------------------------
-
-export interface AdminPoolStatus {
-  driver: string;
-  pool: string;
-  nodes_total: number;
-  nodes_ready: number;
-  gpus_allocatable: number;
-  pending_pods: number;
-}
-
-export interface AdminOverview {
-  object: 'admin_overview';
-  organizations: number;
-  /** Live jobs only. */
-  jobs_by_status: Record<JobStatus, number>;
-  gpu_pool: AdminPoolStatus | null;
-}
-
-/** Infrastructure details the operator console sees for a job. Never exposed to customers. */
-export interface AdminJobInternals {
-  node: string | null;
-  pod: string | null;
-  gpus: string[];
-  encoder: string | null;
-  dispatch_ref: string | null;
-  heartbeat_at: Timestamp | null;
-  /** The unredacted error, before it is mapped to a customer-safe message. */
-  raw_error: JobError | null;
-}
-
-/** A job as the operator console sees it: with its organization and internals. */
-export interface AdminJob extends Job {
-  organization: string | number;
-  internals: AdminJobInternals | null;
-}
-
-export interface AdminOrganizationUpdateParams {
-  plan?: PlanId;
-  suspended?: boolean;
-}
-
-export interface AdminAnnouncementCreateParams {
-  title: string;
-  /** Markdown. */
-  body: string;
-  link?: AnnouncementLink | null;
-  tags?: string[];
-  /** Defaults to now; `null` saves a draft; a future time schedules it. */
-  published_at?: Timestamp | null;
-}
-
-export type AdminAnnouncementUpdateParams = Partial<AdminAnnouncementCreateParams>;
-
-// ---------------------------------------------------------------------------
 // Announcements: the changelog and service-credit notices
 // ---------------------------------------------------------------------------
 
@@ -1486,7 +1650,7 @@ export interface Announcement {
   title: string;
   /** Markdown. */
   body: string;
-  /** `null` for a draft (operator console only). */
+  /** `null` for a draft. */
   published_at: Timestamp | null;
   link: AnnouncementLink | null;
   /** Changelog entries only; may be empty. */
@@ -1765,10 +1929,12 @@ export interface Automation {
   source: { connection_id: string; prefix: string; pattern: string };
   poll_interval_seconds: number;
   settle_seconds: number;
-  /** A system preset slug or `pre_…` id. */
+  /** A system preset slug, your preset's slug or `pre_…` id, or `slug@N` to pin version N. */
   preset: string | null;
-  /** OutputSpec overrides merged over the preset. */
-  output: OutputSpecInput;
+  /** Fields over the preset, merged when a job is made (v2). */
+  output: OutputOverrides;
+  /** The complete spec `preset` and `output` resolve to now. */
+  resolved_output: OutputSpec | null;
   destination: JobDestination | null;
   after_success: 'keep' | 'delete';
   priority: Priority;
@@ -1796,8 +1962,10 @@ export interface AutomationCreateParams {
   poll_interval_seconds?: number;
   /** 0–86400. */
   settle_seconds?: number;
+  /** A preset slug or id, or `slug@N`; resolved each time a job is made. */
   preset?: string | null;
-  output?: OutputSpecInput | null;
+  /** Fields over the preset; without a preset, the whole spec. */
+  output?: OutputOverrides | null;
   destination?: JobDestination | null;
   after_success?: 'keep' | 'delete';
   priority?: Priority;

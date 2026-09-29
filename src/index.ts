@@ -3,6 +3,7 @@ export { Transcdr as default } from './client';
 export { DEFAULT_BASE_URL, SDK_VERSION, buildQuery, idempotencyKey } from './core';
 export type { ClientOptions, FetchLike, QueryValue, RequestOptions } from './core';
 export * from './errors';
+export { assertOutput, validateOutput } from './output';
 export { PagePromise, asList } from './pagination';
 export type { PageFetcher } from './pagination';
 export {

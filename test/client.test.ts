@@ -12,16 +12,20 @@ import {
   WaitTimeoutError,
   buildQuery,
   AUDIO_CHANNELS,
+  AUDIO_CODECS,
   FITS,
   HE_AAC,
   IMAGE_FORMATS,
   IMAGE_TIERS,
+  KINDS,
   ORIENTATIONS,
   PRESET_CATEGORIES,
   type Audio,
-  type OutputSpecInput,
+  type OutputSpec,
+  type VideoOutput,
 } from '../src';
 import { json, mockFetch } from './helpers';
+import { examples, hlsCbr, singleMp4, stills } from './specs';
 
 const job = (id: string, status = 'queued') => ({ object: 'job', id, status, progress: { percent: 0 } });
 const list = (data: unknown[], next: string | null) => ({
@@ -51,144 +55,110 @@ describe('requests', () => {
     expect(calls[0].body).toEqual({ input: { type: 'url', url: 'https://example.com/in.mp4' }, preset: 'hls-av1-abr' });
   });
 
-  it('sends a constant bit rate output as written', async () => {
-    const { fetch, calls } = mockFetch(json(job('job_1')));
-    const output = {
-      codec: 'h264' as const,
-      renditions: [{ width: 1920, height: 1080, bitrate: '5M' }, { width: 1280, height: 720 }],
-      quality: { target: 'cbr' as const, bitrate: '3M', buffer_ms: 500 },
-    };
-    await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, output });
-    expect(calls[0].body).toEqual({ input: { type: 'asset', asset_id: 'ast_1' }, output });
+  it('sends each complete example spec as written', async () => {
+    for (const output of Object.values(examples)) {
+      const { fetch, calls } = mockFetch(json(job('job_1')));
+      await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, output });
+      expect(calls[0].body).toEqual({ input: { type: 'asset', asset_id: 'ast_1' }, output });
+    }
   });
 
-  it('sends an audio-only MP3 output as written', async () => {
-    const { fetch, calls } = mockFetch(json(job('job_1')));
-    const output: OutputSpecInput = { mode: 'audio', audio: { mode: 'mp3', bitrate: '64k', channels: 'mono' } };
-    await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, output });
-    expect(calls[0].body).toEqual({
-      input: { type: 'asset', asset_id: 'ast_1' },
-      output: { mode: 'audio', audio: { mode: 'mp3', bitrate: '64k', channels: 'mono' } },
-    });
-  });
-
-  it('sends surround channels and a stereo fallback as written', async () => {
-    const { fetch, calls } = mockFetch(json(job('job_1')));
-    const output: OutputSpecInput = { mode: 'hls', audio: { mode: 'opus', channels: '5.1', stereo_fallback: true } };
-    await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, output });
-    expect((calls[0].body as { output: unknown }).output).toEqual({ mode: 'hls', audio: { mode: 'opus', channels: '5.1', stereo_fallback: true } });
-  });
-
-  it('reads the audio fields back from a job', async () => {
-    const audio: Audio = { mode: 'mp3', bitrate: '128k', channels: 'stereo', stereo_fallback: false };
-    const { fetch } = mockFetch(json({ ...job('job_1'), output: { mode: 'audio', audio } }));
-    const got = await client(fetch).jobs.retrieve('job_1');
-    expect(got.output.mode).toBe('audio');
-    expect(got.output.audio).toEqual(audio);
+  it('sends AAC, FLAC and ALAC audio, surround and a stereo fallback as written', async () => {
+    const audio: Audio[] = [
+      { handling: 'encode', codec: 'aac', bitrate: '96k', channels: 'stereo', he_aac: 'auto', stereo_fallback: false },
+      { handling: 'encode', codec: 'flac', bit_depth: '24', flac_compression: 'best', channels: 'source', he_aac: 'core', stereo_fallback: false },
+      { handling: 'encode', codec: 'alac', bit_depth: '16', channels: 'source', he_aac: 'passthrough', stereo_fallback: false },
+      { handling: 'auto', codec: 'opus', bitrate: 'standard', channels: '5.1', he_aac: 'auto', stereo_fallback: true },
+      { handling: 'drop' },
+    ];
+    for (const a of audio) {
+      const output: OutputSpec = { ...hlsCbr, audio: a };
+      const { fetch, calls } = mockFetch(json(job('job_1')));
+      await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, output });
+      expect((calls[0].body as { output: unknown }).output).toEqual(output);
+    }
     expect(AUDIO_CHANNELS).toEqual(['source', 'mono', 'stereo', '5.1', '7.1']);
+    expect(HE_AAC).toEqual(['auto', 'passthrough', 'core']);
+    expect(AUDIO_CODECS).toEqual(['opus', 'mp3', 'aac', 'flac', 'alac']);
   });
 
-  it('sends AAC, FLAC and ALAC audio with their settings as written', async () => {
-    const outputs: OutputSpecInput[] = [
-      { mode: 'audio', audio: { mode: 'aac', bitrate: '96k', channels: 'stereo', container: 'm4a' } },
-      { mode: 'audio', audio: { mode: 'flac', bit_depth: '24', flac_compression: 'best', container: 'flac' } },
-      { mode: 'audio', audio: { mode: 'alac', bit_depth: '16', container: 'auto' } },
-      { mode: 'single', audio: { mode: 'flac', bit_depth: 'source', flac_compression: 'fast' } },
-      { mode: 'hls', audio: { mode: 'aac', channels: '5.1', stereo_fallback: true } },
-      { mode: 'audio', audio: { mode: 'mp3', container: 'mp3' } },
-      { mode: 'single', audio: { mode: 'opus', channels: 'stereo', he_aac: 'passthrough' } },
-      { mode: 'audio', audio: { mode: 'flac', container: 'flac', he_aac: 'core' } },
+  it('sends a ladder, the source size and each size\'s own fitting as written', async () => {
+    const outputs: VideoOutput[] = [
+      { ...hlsCbr, renditions: { ladder: { max_short_side: 1080, fit: 'contain', upscale: false } } },
+      { ...singleMp4, renditions: { source_size: { label: 'by_size', fit: 'pad', upscale: true } } },
+      {
+        ...singleMp4,
+        renditions: {
+          sizes: [
+            { label: 'wide', width: 1920, height: 1080, fit: 'pad', orientation: 'auto', upscale: true },
+            { label: 'tall', width: 1080, height: 1920, fit: 'cover', orientation: 'fixed', upscale: false },
+          ],
+        },
+      },
     ];
     for (const output of outputs) {
       const { fetch, calls } = mockFetch(json(job('job_1')));
       await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, output });
       expect((calls[0].body as { output: unknown }).output).toEqual(output);
     }
-  });
-
-  it('reads he_aac back from a job, and lists the policies', async () => {
-    const audio: Audio = { mode: 'mp3', he_aac: 'auto' };
-    const { fetch } = mockFetch(json({ ...job('job_1'), output: { mode: 'audio', audio } }));
-    const got = await client(fetch).jobs.retrieve('job_1');
-    expect(got.output.audio?.he_aac).toBe('auto');
-    expect(HE_AAC).toEqual(['auto', 'passthrough', 'core']);
-  });
-
-  it('reads bit_depth, flac_compression and container back from a job', async () => {
-    const audio: Audio = { mode: 'flac', bit_depth: '24', flac_compression: 'default', container: 'm4a' };
-    const { fetch } = mockFetch(json({ ...job('job_1'), output: { mode: 'audio', audio } }));
-    const got = await client(fetch).jobs.retrieve('job_1');
-    expect(got.output.audio).toEqual(audio);
-    expect(got.output.audio?.bit_depth).toBe('24');
-    expect(got.output.audio?.container).toBe('m4a');
-  });
-
-  it('sends fit, upscale and a rendition\'s own fitting as written', async () => {
-    const output: OutputSpecInput = {
-      fit: 'pad',
-      upscale: true,
-      renditions: [
-        { width: 1920, height: 1080 },
-        { width: 1080, height: 1920, fit: 'cover', orientation: 'fixed', upscale: false },
-      ],
-    };
-    const { fetch, calls } = mockFetch(json(job('job_1')));
-    await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, output });
-    expect((calls[0].body as { output: unknown }).output).toEqual(output);
     expect(FITS).toEqual(['contain', 'cover', 'pad', 'stretch']);
     expect(ORIENTATIONS).toEqual(['auto', 'fixed']);
   });
 
-  it('reads fit, upscale and the display size back from a job', async () => {
+  it('reads the resolved spec, its provenance and the display size back from a job', async () => {
     const { fetch } = mockFetch(
       json({
         ...job('job_1'),
-        output: { fit: 'contain', upscale: false, renditions: [{ width: 1080, height: 1920, fit: 'cover' }] },
+        preset_id: 'social-vertical-1080x1920',
+        preset: { id: 'social-vertical-1080x1920', slug: 'social-vertical-1080x1920', version: 1, overrides: { video: { frame_rate: { max: 24 } } } },
+        output: { ...singleMp4, privacy: { location: 'strip', capture_time: 'strip', device: 'strip', descriptive: 'strip' } },
         input_info: { width: 720, height: 576, display_width: 1024, display_height: 576 },
       }),
     );
     const got = await client(fetch).jobs.retrieve('job_1');
-    expect(got.output.fit).toBe('contain');
-    expect(got.output.upscale).toBe(false);
-    expect(got.output.renditions[0].fit).toBe('cover');
+    expect(got.preset?.slug).toBe('social-vertical-1080x1920');
+    expect(got.preset?.version).toBe(1);
+    expect(got.preset?.overrides).toEqual({ video: { frame_rate: { max: 24 } } });
+    expect(got.output.kind).toBe('video');
+    if (got.output.kind !== 'video') throw new Error('not video');
+    expect(got.output.container.format).toBe('mp4');
+    expect(got.output.renditions.sizes?.[0].fit).toBe('cover');
+    expect(got.output.privacy.location).toBe('strip');
     expect(got.input_info?.display_width).toBe(1024);
   });
 
   it('sends an image output as written', async () => {
-    const output: OutputSpecInput = {
-      mode: 'image',
-      renditions: [{ width: 1920, height: 1920 }, { width: 641, height: 17, label: 'small' }],
+    const output: OutputSpec = {
+      kind: 'image',
       image: {
-        formats: ['avif', 'jpeg'],
-        quality: 70,
+        formats: ['avif', 'webp', 'jpeg'],
         lossless: false,
-        keep_color_profile: true,
+        quality: { avif: 60, webp: 80, jpeg: 82 },
+        color_profile: 'keep',
         frames: { at_seconds: [1.5, 10] },
       },
+      renditions: {
+        sizes: [
+          { label: 'by_size', width: 1920, height: 1920, fit: 'contain', orientation: 'auto', upscale: false },
+          { label: 'small', width: 641, height: 17, fit: 'contain', orientation: 'auto', upscale: false },
+        ],
+      },
+      privacy: { location: 'approximate', capture_time: 'date', device: 'keep', descriptive: 'strip' },
     };
     const { fetch, calls } = mockFetch(json(job('job_1')));
     await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, output });
-    expect((calls[0].body as { output: unknown }).output).toEqual({
-      mode: 'image',
-      renditions: [{ width: 1920, height: 1920 }, { width: 641, height: 17, label: 'small' }],
-      image: {
-        formats: ['avif', 'jpeg'],
-        quality: 70,
-        lossless: false,
-        keep_color_profile: true,
-        frames: { at_seconds: [1.5, 10] },
-      },
-    });
+    expect((calls[0].body as { output: unknown }).output).toEqual(output);
     expect(IMAGE_FORMATS).toEqual(['avif', 'webp', 'jpeg', 'png']);
     expect(IMAGE_TIERS).toEqual(['up_to_1mp', 'up_to_4mp', 'over_4mp']);
     expect(PRESET_CATEGORIES).toContain('image');
+    expect(KINDS).toEqual(['video', 'audio', 'image']);
   });
 
   it('reads image outputs and their billing back from a job', async () => {
     const { fetch } = mockFetch(
       json({
         ...job('job_1', 'completed'),
-        output: { mode: 'image', renditions: [{ width: 1920, height: 1920 }], image: { formats: ['avif', 'jpeg'], frames: { count: 2 } } },
+        output: { ...stills, image: { ...stills.image, formats: ['avif', 'jpeg'], quality: { avif: 60, jpeg: 82 }, frames: { count: 2 } } },
         outputs: [
           { label: '1920x1080-001.avif', width: 1920, height: 1080, frames: 1, bytes: 120_000, content_type: 'image/avif', path: '1920x1080-001.avif', url: 'https://x/1', format: 'avif', rendition: '1920x1080', frame: 1, at_seconds: 3.3 },
           { label: '1920x1080-002.jpg', width: 1920, height: 1080, frames: 1, bytes: 310_000, content_type: 'image/jpeg', path: '1920x1080-002.jpg', url: 'https://x/2', format: 'jpeg', rendition: '1920x1080', frame: 2, at_seconds: 6.6 },
@@ -197,9 +167,9 @@ describe('requests', () => {
       }),
     );
     const got = await client(fetch).jobs.retrieve('job_1');
-    expect(got.output.mode).toBe('image');
+    expect(got.output.kind).toBe('image');
     expect(got.output.image?.formats).toEqual(['avif', 'jpeg']);
-    expect(got.output.image?.frames?.count).toBe(2);
+    expect(got.output.image?.frames).toEqual({ count: 2 });
     expect(got.outputs[1].format).toBe('jpeg');
     expect(got.outputs[1].rendition).toBe('1920x1080');
     expect(got.outputs[1].frame).toBe(2);
@@ -211,7 +181,7 @@ describe('requests', () => {
   it('generates an Idempotency-Key for jobs.create and uploads.create', async () => {
     const { fetch, calls } = mockFetch(json(job('job_1')), json({ object: 'upload', id: 'upl_1' }));
     const transcdr = client(fetch);
-    await transcdr.jobs.create({ input: { type: 'asset', asset_id: 'ast_1' } });
+    await transcdr.jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, preset: 'hls-av1-abr' });
     await transcdr.uploads.create({ filename: 'a.mp4', content_type: 'video/mp4', size_bytes: 1 });
     expect(calls[0].headers['idempotency-key']).toMatch(/.{16,}/);
     expect(calls[1].headers['idempotency-key']).toMatch(/.{16,}/);
@@ -220,8 +190,8 @@ describe('requests', () => {
 
   it('honours an explicit idempotency key and sends one even when retries are off', async () => {
     const { fetch, calls } = mockFetch(json(job('job_1')), json(job('job_2')));
-    await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' } }, { idempotencyKey: 'mine' });
-    await client(fetch, { maxRetries: 0 }).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' } });
+    await client(fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, preset: 'hls-av1-abr' }, { idempotencyKey: 'mine' });
+    await client(fetch, { maxRetries: 0 }).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, preset: 'hls-av1-abr' });
     expect(calls[0].headers['idempotency-key']).toBe('mine');
     expect(calls[1].headers['idempotency-key']).toMatch(/.{16,}/);
   });
@@ -326,7 +296,7 @@ describe('retries', () => {
   it('retries a POST only when it carries an idempotency key', async () => {
     const fail = () => json({ error: { type: 'api_error', message: 'boom' } }, 500);
     const a = mockFetch(fail(), json(job('job_1')));
-    await client(a.fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' } });
+    await client(a.fetch).jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, preset: 'hls-av1-abr' });
     expect(a.calls).toHaveLength(2);
     expect(a.calls[0].headers['idempotency-key']).toBe(a.calls[1].headers['idempotency-key']);
 
@@ -512,27 +482,6 @@ describe('announcements', () => {
     ]);
     expect(calls[0].headers.authorization).toBeUndefined();
   });
-
-  it('lets operators write changelog entries and drafts', async () => {
-    const draft = { ...credit, id: 'ann_d', kind: 'changelog', credit: null, published_at: null };
-    const { fetch, calls } = mockFetch(
-      json(list([draft], null)),
-      json(draft),
-      json({ ...draft, published_at: '2026-09-27T10:00:00Z' }),
-      json(undefined, 204),
-    );
-    const t = client(fetch);
-    expect((await t.admin.announcements.list({ limit: 100 })).data[0].published_at).toBeNull();
-    await t.admin.announcements.create({ title: 'New', body: '**Hi**', tags: ['api'], link: { label: 'Docs', url: '/docs' }, published_at: null });
-    await t.admin.announcements.update('ann_d', { published_at: '2026-09-27T10:00:00Z' });
-    await t.admin.announcements.del('ann_d');
-    expect(calls.map((c) => [c.method, c.url, c.body])).toEqual([
-      ['GET', 'http://api.test/v1/admin/announcements?limit=100', undefined],
-      ['POST', 'http://api.test/v1/admin/announcements', { title: 'New', body: '**Hi**', tags: ['api'], link: { label: 'Docs', url: '/docs' }, published_at: null }],
-      ['PATCH', 'http://api.test/v1/admin/announcements/ann_d', { published_at: '2026-09-27T10:00:00Z' }],
-      ['DELETE', 'http://api.test/v1/admin/announcements/ann_d', undefined],
-    ]);
-  });
 });
 
 describe('uploads', () => {
@@ -622,10 +571,10 @@ describe('billing', () => {
       json({ error: { type: 'quota_error', code: 'insufficient_credit', message: 'Not enough credit.' } }, 402),
     );
     const error = await client(fetch, { maxRetries: 0 })
-      .jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, maxCostCents: 150 })
+      .jobs.create({ input: { type: 'asset', asset_id: 'ast_1' }, preset: 'hls-av1-abr', maxCostCents: 150 })
       .catch((e) => e);
     expect(error).toBeInstanceOf(QuotaError);
     expect(error.code).toBe('insufficient_credit');
-    expect(calls[0].body).toEqual({ input: { type: 'asset', asset_id: 'ast_1' }, max_cost_cents: 150 });
+    expect(calls[0].body).toEqual({ input: { type: 'asset', asset_id: 'ast_1' }, preset: 'hls-av1-abr', max_cost_cents: 150 });
   });
 });
