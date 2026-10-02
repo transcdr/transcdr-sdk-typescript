@@ -1029,6 +1029,8 @@ export type Scope =
   | 'connections:write'
   | 'automations:read'
   | 'automations:write'
+  | 'support:read'
+  | 'support:write'
   | '*';
 
 export const SCOPES: readonly Exclude<Scope, '*'>[] = [
@@ -1051,6 +1053,8 @@ export const SCOPES: readonly Exclude<Scope, '*'>[] = [
   'connections:write',
   'automations:read',
   'automations:write',
+  'support:read',
+  'support:write',
 ];
 
 export type KeyMode = 'live' | 'test';
@@ -2019,4 +2023,115 @@ export interface Delivery {
   next_retry_at: Timestamp | null;
   created_at: Timestamp;
   completed_at: Timestamp | null;
+}
+
+// ---------------------------------------------------------------------------
+// Support
+// ---------------------------------------------------------------------------
+
+export type SupportCategory = 'job_problem' | 'billing' | 'account' | 'bug' | 'feature_request' | 'other';
+
+/** `critical`: production is down or many jobs are failing. `high`: important work is blocked. `normal`. `low`: a question or something cosmetic. */
+export type SupportSeverity = 'critical' | 'high' | 'normal' | 'low';
+
+export type SupportTicketStatus = 'open' | 'waiting_on_us' | 'waiting_on_customer' | 'resolved' | 'closed';
+
+export const SUPPORT_CATEGORIES: readonly SupportCategory[] = ['job_problem', 'billing', 'account', 'bug', 'feature_request', 'other'];
+export const SUPPORT_SEVERITIES: readonly SupportSeverity[] = ['critical', 'high', 'normal', 'low'];
+export const SUPPORT_TICKET_STATUSES: readonly SupportTicketStatus[] = ['open', 'waiting_on_us', 'waiting_on_customer', 'resolved', 'closed'];
+
+/** Credit added to your account because of a ticket. */
+export interface SupportCredit {
+  object: 'support_credit';
+  id: string;
+  /** Formatted, e.g. `$5.00`. */
+  amount: string;
+  amount_micros: number;
+  reason: string;
+  /** `null`: never expires. */
+  expires_at: Timestamp | null;
+  created_at: Timestamp;
+}
+
+/** What a system message records; `null` on an ordinary message. */
+export type SupportMessageEvent =
+  | { type: 'status'; from: SupportTicketStatus; to: SupportTicketStatus }
+  | { type: 'severity'; from: SupportSeverity; to: SupportSeverity }
+  | { type: 'assignee'; from: string | null; to: string | null }
+  | { type: 'credit'; amount: string };
+
+/** One message on a ticket. Messages are append-only: never edited or deleted. */
+export interface SupportMessage {
+  object: 'support_message';
+  id: string;
+  /** Support staff appear as `Transcdr support`. */
+  author: { kind: 'customer' | 'staff' | 'system'; name: string };
+  body: string;
+  /** Always `false` for you: staff-only notes are never returned. */
+  internal: boolean;
+  event: SupportMessageEvent | null;
+  source: 'dashboard' | 'api' | 'email' | 'system';
+  created_at: Timestamp;
+}
+
+export interface SupportTicket {
+  object: 'support_ticket';
+  id: string;
+  /** `TCK-1001`, the reference emails use. Accepted wherever a ticket id is. */
+  reference: string;
+  number: number;
+  subject: string;
+  category: SupportCategory;
+  /** The current severity; support may adjust the one you filed. */
+  severity: SupportSeverity;
+  filed_severity: SupportSeverity;
+  status: SupportTicketStatus;
+  job_ids: string[];
+  asset_ids: string[];
+  requester: { id: string; name: string; email: string };
+  created_at: Timestamp;
+  updated_at: Timestamp;
+  last_message_at: Timestamp | null;
+  /** Since when the ticket has been waiting on support; `null` unless open or waiting on us. */
+  waiting_since: Timestamp | null;
+  resolved_at: Timestamp | null;
+  closed_at: Timestamp | null;
+  credits: SupportCredit[];
+  credit_total_micros: number;
+  /** Present on a single ticket, oldest first. */
+  messages?: SupportMessage[];
+}
+
+export interface SupportTicketCreateParams {
+  /** At most 200 characters. */
+  subject: string;
+  category: SupportCategory;
+  severity: SupportSeverity;
+  /** At most 20,000 characters. */
+  description: string;
+  /** Up to 20 of your organization's jobs. */
+  job_ids?: string[];
+  /** Up to 20 of your organization's assets. */
+  asset_ids?: string[];
+}
+
+export interface SupportTicketListParams {
+  /** One status or several (an array, sent comma-separated). */
+  status?: SupportTicketStatus | SupportTicketStatus[];
+  /** 1–100. */
+  limit?: number;
+}
+
+export interface SupportPreferences {
+  object: 'support_preferences';
+  /** Email me about tickets I opened. */
+  ticket_emails: boolean;
+  /** Owners and admins: also email me about every ticket in the organization. */
+  org_ticket_emails: boolean;
+  can_receive_org_emails: boolean;
+}
+
+export interface SupportPreferencesUpdateParams {
+  ticket_emails?: boolean;
+  org_ticket_emails?: boolean;
 }

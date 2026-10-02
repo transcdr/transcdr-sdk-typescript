@@ -452,6 +452,7 @@ Every method also takes a trailing `RequestOptions` (`signal`, `timeoutMs`, `max
 | `status` | `retrieve`: `{ status, queue_depth, running_jobs, version }` |
 | `stats` | `get`: public platform totals, last 24 h and 30 daily points |
 | `announcements` | `list({ unseen, kind, limit })`, `markSeen(ids)`, `markAllSeen()` |
+| `support` | `tickets.list({ status, limit })`, `tickets.create`, `tickets.retrieve` (id or `TCK-…`), `tickets.reply`, `tickets.resolve`, `tickets.reopen`, `preferences.retrieve`, `preferences.update` |
 | `changelog` | `list`: public, published changelog entries |
 
 For anything newer than the SDK, `transcdr.request(method, path, options)` calls an endpoint directly.
@@ -770,6 +771,31 @@ await transcdr.announcements.markSeen(data.map((a) => a.id)); // or markAllSeen(
 ```ts
 for await (const entry of new Transcdr().changelog.list().autoPaginate()) console.log(entry.published_at, entry.title);
 ```
+
+## Support
+
+Open a ticket about a job, billing or anything else, and follow the conversation. The key needs `support:write`
+(or `support:read` to only read). Owners and admins see every ticket in the organization; members see their own.
+
+```ts
+const ticket = await transcdr.support.tickets.create({
+  subject: 'Output has no audio',
+  category: 'job_problem', // billing, account, bug, feature_request, other
+  severity: 'high', // critical: production down · high: important work blocked · normal · low: a question
+  description: 'The MP4 plays silently; the source has a stereo AAC track.',
+  job_ids: [job.id],
+});
+console.log(ticket.reference); // TCK-1001
+
+const latest = await transcdr.support.tickets.retrieve(ticket.id);
+for (const m of latest.messages ?? []) console.log(m.author.name, m.body);
+await transcdr.support.tickets.reply(ticket.id, 'Retried, it works now. Thanks!');
+await transcdr.support.tickets.resolve(ticket.id);
+```
+
+Messages are append-only. When a report helps find a real problem, credit may be added to your account; it shows
+up in the ticket's `credits`. Creates and replies are not retried automatically, so a lost response never files a
+ticket twice.
 
 ## Test mode
 
